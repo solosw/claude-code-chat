@@ -81,6 +81,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let lastPendingEditIndex = -1; // Track the last Edit/MultiEdit/Write toolUse without result
 		let lastPendingEditData = null; // Store diff data for the pending edit { filePath, oldContent, newContent }
 		let attachedImages = []; // Array of { filePath, previewUri }
+		let latestChangesItems = [];
+		let latestChangesSessionTitle = '';
 
 		// Open diff using stored data (no file read needed)
 		function openDiffEditor() {
@@ -929,6 +931,83 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				const truncated = decodedValue.substring(0, 97) + '...';
 				container.innerHTML = '<strong>' + key + ':</strong> ' + truncated + ' <span class="expand-btn" data-key="' + key + '" data-value="' + value + '" onclick="toggleExpand(this)">expand</span>';
 			}
+		}
+
+		function getLatestChangeStatusIcon(status) {
+			if (status === 'added') return 'A';
+			if (status === 'deleted') return 'D';
+			return 'M';
+		}
+
+		function renderLatestChanges() {
+			const sessionEl = document.getElementById('latestChangesSession');
+			const listEl = document.getElementById('latestChangesList');
+			if (!listEl || !sessionEl) return;
+
+			sessionEl.textContent = latestChangesSessionTitle || '';
+
+			if (!latestChangesItems || latestChangesItems.length === 0) {
+				listEl.innerHTML = '<div class="latest-changes-empty">No latest changes</div>';
+				return;
+			}
+
+			listEl.innerHTML = latestChangesItems.map(item => renderLatestChangeItem(item)).join('');
+		}
+
+		function renderLatestChangeItem(item) {
+			const icon = getLatestChangeStatusIcon(item.status);
+			const revertedClass = item.isReverted ? ' reverted' : '';
+			const safeItem = encodeURIComponent(JSON.stringify(item));
+			const meta = [item.timeLabel, item.directoryLabel].filter(Boolean).join(' · ');
+			return (
+				'<div class="latest-change-item' + revertedClass + '" data-change-key="' + escapeHtml(item.changeKey || '') + '" onclick="openLatestChangeDiffFromEncoded(\'' + safeItem + '\')">' +
+					'<div class="latest-change-icon ' + escapeHtml(item.status) + '">' + icon + '</div>' +
+					'<div class="latest-change-main">' +
+						'<div class="latest-change-name" title="' + escapeHtml(item.fileName) + '">' + escapeHtml(item.fileName) + '</div>' +
+						'<div class="latest-change-meta" title="' + escapeHtml(meta) + '">' + escapeHtml(meta) + '</div>' +
+					'</div>' +
+					'<div class="latest-change-actions">' +
+						'<button class="latest-change-action" onclick="event.stopPropagation(); openLatestChangeDiffFromEncoded(\'' + safeItem + '\')">Diff</button>' +
+						'<button class="latest-change-action accept" onclick="event.stopPropagation(); acceptLatestChangeFromEncoded(\'' + safeItem + '\')">Accept</button>' +
+						'<button class="latest-change-action reject" onclick="event.stopPropagation(); rejectLatestChangeFromEncoded(\'' + safeItem + '\')">Reject</button>' +
+					'</div>' +
+				'</div>'
+			);
+		}
+
+		function decodeLatestChangeItem(encodedItem) {
+			try {
+				return JSON.parse(decodeURIComponent(encodedItem));
+			} catch (error) {
+				console.error('Failed to decode latest change item:', error);
+				return null;
+			}
+		}
+
+		function refreshLatestChanges() {
+			vscode.postMessage({ type: 'getLatestChanges' });
+		}
+
+		function openLatestChangeDiffFromEncoded(encodedItem) {
+			const item = decodeLatestChangeItem(encodedItem);
+			if (!item) return;
+			vscode.postMessage({ type: 'openLatestChangeDiff', item: item });
+		}
+
+		function rejectLatestChangeFromEncoded(encodedItem) {
+			const item = decodeLatestChangeItem(encodedItem);
+			if (!item) return;
+			vscode.postMessage({ type: 'rejectLatestChange', item: item });
+		}
+
+		function acceptLatestChangeFromEncoded(encodedItem) {
+			const item = decodeLatestChangeItem(encodedItem);
+			if (!item) return;
+			vscode.postMessage({ type: 'acceptLatestChange', item: item });
+		}
+
+		function rejectAllLatestChanges() {
+			vscode.postMessage({ type: 'rejectAllLatestChanges' });
 		}
 
 		function sendMessage() {
@@ -5233,7 +5312,26 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				// Update permissions UI
 				renderPermissions(message.data);
 			}
+
+			if (message.type === 'latestChangesData') {
+				latestChangesItems = (message.data && message.data.items) || [];
+				latestChangesSessionTitle = (message.data && message.data.sessionTitle) || '';
+				renderLatestChanges();
+			}
+
+			if (message.type === 'latestChangeReverted' && message.data) {
+				latestChangesItems = latestChangesItems.map(item => {
+					if ((message.data.changeKey && item.changeKey === message.data.changeKey) ||
+						(item.sessionId === message.data.sessionId && item.absolutePath === message.data.absolutePath)) {
+						return Object.assign({}, item, { isReverted: true });
+					}
+					return item;
+				});
+				renderLatestChanges();
+			}
 		});
+
+		refreshLatestChanges();
 
 	${getSkillsScript()}
 	${getPluginsScript()}

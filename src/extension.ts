@@ -2,7 +2,16 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as util from 'util';
 import * as path from 'path';
+import * as fs from 'fs';
 import getHtml from './ui';
+import {
+	FileBackup,
+	SessionInfo,
+	Snapshot,
+	findSessionsForWorkspace,
+	readBackupFile,
+	findNextBackup,
+} from './checkpointService';
 import { startRouter, stopRouter, setModelConfig, setBaseUrl } from './router';
 import { fetchAndResolveModels } from './model-updater';
 import recommendedModels from './recommended-models.json';
@@ -28,9 +37,9 @@ class DiffContentProvider implements vscode.TextDocumentContentProvider {
 export function activate(context: vscode.ExtensionContext) {
 
 	if (context.extensionMode === vscode.ExtensionMode.Development) {
-		OPENCREDITS_API_URL = 'http://localhost:8787';
-		OPENCREDITS_WEB_URL = 'http://localhost:3000';
-		OPENCREDITS_PUBLISHABLE_KEY = 'oc_pk_c78315e9ff3a425ebca398bb69282429';
+		// OPENCREDITS_API_URL = 'http://localhost:8787';
+		// OPENCREDITS_WEB_URL = 'http://localhost:3000';
+		// OPENCREDITS_PUBLISHABLE_KEY = 'oc_pk_c78315e9ff3a425ebca398bb69282429';
 	}
 	const provider = new ClaudeChatProvider(context.extensionUri, context);
 
@@ -118,6 +127,22 @@ interface ConversationData {
 	filename: string;
 }
 
+interface LatestChangeItem {
+	changeKey: string;
+	sessionId: string;
+	filePath: string;
+	absolutePath: string;
+	backupFileName: string | null;
+	version: number;
+	backupTime: string;
+	nextBackupFileName: string | null;
+	status: 'added' | 'modified' | 'deleted';
+	fileName: string;
+	directoryLabel: string;
+	timeLabel: string;
+	isReverted: boolean;
+}
+
 class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -197,6 +222,8 @@ class ClaudeChatProvider {
 	private _selectedModel: string = 'default'; // Default model
 	private _isProcessing: boolean | undefined;
 	private _draftMessage: string = '';
+	private _revertedLatestChangeKeys: Set<string> = new Set();
+	private _acceptedLatestChangeKeys: Set<string> = new Set();
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -407,6 +434,9 @@ class ClaudeChatProvider {
 		// Send current settings to webview
 		this._sendCurrentSettings();
 
+		// Send latest checkpoint-based changes for embedded panel
+		this._sendLatestChanges();
+
 		// Fetch and send OpenCredits balance if using OpenCredits
 		if (this._isOpenCredits() || this._getOpenCreditsKey()) {
 			this._sendOpenCreditsBalance();
@@ -598,6 +628,21 @@ class ClaudeChatProvider {
 				return;
 			case 'openDiffByIndex':
 				this._openDiffByMessageIndex(message.messageIndex);
+				return;
+			case 'getLatestChanges':
+				this._sendLatestChanges();
+				return;
+			case 'openLatestChangeDiff':
+				this._openLatestChangeDiff(message.item);
+				return;
+			case 'rejectLatestChange':
+				this._rejectLatestChange(message.item);
+				return;
+			case 'acceptLatestChange':
+				this._acceptLatestChange(message.item);
+				return;
+			case 'rejectAllLatestChanges':
+				this._rejectAllLatestChanges();
 				return;
 			case 'createImageFile':
 				this._createImageFile(message.imageData, message.imageType);
@@ -1241,6 +1286,11 @@ class ClaudeChatProvider {
 			this._postMessage({
 				type: 'setProcessing',
 				data: { isProcessing: false }
+			});
+
+			// Refresh embedded latest changes panel after Claude finishes
+			this._sendLatestChanges().catch(error => {
+				console.error('Failed to refresh latest changes:', error);
 			});
 
 			if (code !== 0 && errorOutput.trim()) {
@@ -3212,7 +3262,10 @@ class ClaudeChatProvider {
 	}
 
 	private async _loadConversationHistory(filename: string): Promise<void> {
-		if (!this._conversationsPath) { return; }
+		if (!this._conversationsPath) {
+			this._sendReadyMessage();
+			return;
+		}
 
 		try {
 			const filePath = path.join(this._conversationsPath, filename);
@@ -3223,6 +3276,7 @@ class ClaudeChatProvider {
 				const content = await vscode.workspace.fs.readFile(fileUri);
 				conversationData = JSON.parse(new TextDecoder().decode(content));
 			} catch {
+				this._sendReadyMessage();
 				return;
 			}
 
@@ -3323,6 +3377,7 @@ class ClaudeChatProvider {
 
 		} catch (error: any) {
 			console.error('Failed to load conversation history:', error.message);
+			this._sendReadyMessage();
 		}
 	}
 
@@ -3763,6 +3818,318 @@ class ClaudeChatProvider {
 
 	private _dismissWSLAlert() {
 		this._context.globalState.update('wslAlertDismissed', true);
+	}
+
+	private async _sendLatestChanges() {
+		try {
+			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+			if (!workspacePath) {
+				this._postMessage({ type: 'latestChangesData', data: { sessionTitle: '', items: [] } });
+				return;
+			}
+
+			const sessions = await findSessionsForWorkspace(workspacePath);
+			if (sessions.length === 0) {
+				this._postMessage({ type: 'latestChangesData', data: { sessionTitle: '', items: [] } });
+				return;
+			}
+
+			const latestSession = sessions[0];
+			const sessionTitle = latestSession.firstUserMessage || latestSession.slug || latestSession.sessionId.slice(0, 12);
+			const items = this._getLatestChangeItems(latestSession);
+			this._postMessage({
+				type: 'latestChangesData',
+				data: {
+					sessionTitle,
+					items,
+				},
+			});
+		} catch (error) {
+			console.error('Failed to load latest changes:', error);
+			this._postMessage({ type: 'latestChangesData', data: { sessionTitle: '', items: [] } });
+		}
+	}
+
+	private _getLatestChangeItems(session: SessionInfo): LatestChangeItem[] {
+		if (session.snapshots.length === 0) {
+			return [];
+		}
+
+		const lastSnap = session.snapshots[session.snapshots.length - 1];
+		return lastSnap.files
+			.filter(file => this._hasActualDiff(session, lastSnap, file))
+			.map(file => this._toLatestChangeItem(session, lastSnap, file))
+			.filter(item => !this._acceptedLatestChangeKeys.has(item.changeKey));
+	}
+
+	private _toLatestChangeItem(session: SessionInfo, snapshot: Snapshot, file: FileBackup): LatestChangeItem {
+		const fileExists = fs.existsSync(file.absolutePath);
+		const status: 'added' | 'modified' | 'deleted' = file.backupFileName === null
+			? 'added'
+			: !fileExists
+				? 'deleted'
+				: 'modified';
+		const dirName = path.dirname(file.filePath);
+		const directoryLabel = dirName && dirName !== '.' ? this._truncateMiddle(dirName, 36) : '';
+		const key = this._getLatestChangeKey(session.sessionId, file.absolutePath);
+
+		return {
+			changeKey: key,
+			sessionId: session.sessionId,
+			filePath: file.filePath,
+			absolutePath: file.absolutePath,
+			backupFileName: file.backupFileName,
+			version: file.version,
+			backupTime: file.backupTime,
+			nextBackupFileName: findNextBackup(session, snapshot.messageId, file.filePath),
+			status,
+			fileName: path.basename(file.absolutePath),
+			directoryLabel,
+			timeLabel: new Date(file.backupTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+			isReverted: this._revertedLatestChangeKeys.has(key),
+		};
+	}
+
+	private _hasActualDiff(session: SessionInfo, snapshot: Snapshot, file: FileBackup): boolean {
+		const nextBackup = findNextBackup(session, snapshot.messageId, file.filePath);
+
+		if (file.backupFileName === null) {
+			if (nextBackup) {
+				const nextContent = readBackupFile(session.sessionId, nextBackup);
+				return nextContent === null || nextContent !== '';
+			}
+			if (!fs.existsSync(file.absolutePath)) {
+				return false;
+			}
+			try {
+				return fs.readFileSync(file.absolutePath, 'utf-8') !== '';
+			} catch {
+				return true;
+			}
+		}
+
+		const backup = readBackupFile(session.sessionId, file.backupFileName);
+		if (backup === null) {
+			return true;
+		}
+
+		if (!fs.existsSync(file.absolutePath)) {
+			return backup !== '';
+		}
+
+		try {
+			const current = fs.readFileSync(file.absolutePath, 'utf-8');
+			return backup !== current;
+		} catch {
+			return true;
+		}
+	}
+
+	private async _openLatestChangeDiff(item: LatestChangeItem | undefined) {
+		if (!item) {
+			return;
+		}
+
+		try {
+			const fileName = path.basename(item.absolutePath);
+			let oldContent = '';
+			let newContent = '';
+
+			if (item.backupFileName === null) {
+				oldContent = '';
+				if (item.nextBackupFileName) {
+					newContent = readBackupFile(item.sessionId, item.nextBackupFileName) ?? '';
+				} else if (fs.existsSync(item.absolutePath)) {
+					newContent = fs.readFileSync(item.absolutePath, 'utf-8');
+				}
+			} else {
+				oldContent = readBackupFile(item.sessionId, item.backupFileName) ?? '';
+				if (item.nextBackupFileName) {
+					newContent = readBackupFile(item.sessionId, item.nextBackupFileName) ?? '';
+				} else if (fs.existsSync(item.absolutePath)) {
+					newContent = fs.readFileSync(item.absolutePath, 'utf-8');
+				}
+			}
+
+			await this._openDiffEditor(oldContent, newContent, item.absolutePath || fileName);
+		} catch (error) {
+			console.error('Error opening latest change diff:', error);
+			vscode.window.showErrorMessage('Failed to open latest change diff');
+		}
+	}
+
+	private async _rejectLatestChange(item: LatestChangeItem | undefined) {
+		if (!item) {
+			return;
+		}
+
+		const fileName = path.basename(item.absolutePath);
+
+		if (!item.backupFileName) {
+			const confirmDelete = await vscode.window.showWarningMessage(
+				`Delete ${fileName}? This file was created by Claude and will be permanently deleted.`,
+				{ modal: true },
+				'Delete'
+			);
+			if (confirmDelete !== 'Delete') {
+				return;
+			}
+			try {
+				if (fs.existsSync(item.absolutePath)) {
+					fs.unlinkSync(item.absolutePath);
+				}
+				this._markLatestChangeReverted(item);
+				this._acceptedLatestChangeKeys.delete(item.changeKey);
+				await this._sendLatestChanges();
+				vscode.window.showInformationMessage(`Deleted ${fileName}`);
+			} catch (error: any) {
+				vscode.window.showErrorMessage(`Failed to delete file: ${error.message}`);
+			}
+			return;
+		}
+
+		const confirmRestore = await vscode.window.showWarningMessage(
+			`Restore ${fileName} to checkpoint v${item.version}? This will overwrite the current file.`,
+			{ modal: true },
+			'Restore'
+		);
+		if (confirmRestore !== 'Restore') {
+			return;
+		}
+
+		const content = readBackupFile(item.sessionId, item.backupFileName);
+		if (content === null) {
+			vscode.window.showErrorMessage(`Could not read backup file: ${item.backupFileName}`);
+			return;
+		}
+
+		try {
+			const dir = path.dirname(item.absolutePath);
+			if (!fs.existsSync(dir)) {
+				fs.mkdirSync(dir, { recursive: true });
+			}
+			fs.writeFileSync(item.absolutePath, content, 'utf-8');
+			this._markLatestChangeReverted(item);
+			this._acceptedLatestChangeKeys.delete(item.changeKey);
+			await this._sendLatestChanges();
+			vscode.window.showInformationMessage(`Restored ${fileName} to checkpoint v${item.version}`);
+		} catch (error: any) {
+			vscode.window.showErrorMessage(`Failed to restore file: ${error.message}`);
+		}
+	}
+
+	private async _acceptLatestChange(item: LatestChangeItem | undefined) {
+		if (!item) {
+			return;
+		}
+		this._acceptedLatestChangeKeys.add(item.changeKey);
+		this._revertedLatestChangeKeys.delete(item.changeKey);
+		await this._sendLatestChanges();
+		vscode.window.showInformationMessage(`Accepted current changes for ${path.basename(item.absolutePath)}`);
+	}
+
+	private async _rejectAllLatestChanges() {
+		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		if (!workspacePath) {
+			return;
+		}
+
+		const sessions = await findSessionsForWorkspace(workspacePath);
+		if (sessions.length === 0) {
+			vscode.window.showInformationMessage('No sessions found.');
+			return;
+		}
+
+		const latestSession = sessions[0];
+		const items = this._getLatestChangeItems(latestSession);
+		if (items.length === 0) {
+			vscode.window.showInformationMessage('No files to reject.');
+			return;
+		}
+
+		const modifiedCount = items.filter(item => item.backupFileName !== null).length;
+		const createdCount = items.filter(item => item.backupFileName === null && fs.existsSync(item.absolutePath)).length;
+		const parts: string[] = [];
+		if (modifiedCount > 0) parts.push(`restore ${modifiedCount} modified`);
+		if (createdCount > 0) parts.push(`delete ${createdCount} created`);
+
+		const confirm = await vscode.window.showWarningMessage(
+			`Reject all changes in latest session? This will ${parts.join(' and ')}.`,
+			{ modal: true },
+			'Reject All'
+		);
+		if (confirm !== 'Reject All') {
+			return;
+		}
+
+		let restored = 0;
+		let deleted = 0;
+		let failed = 0;
+
+		for (const item of items) {
+			try {
+				if (item.backupFileName === null) {
+					if (fs.existsSync(item.absolutePath)) {
+						fs.unlinkSync(item.absolutePath);
+						deleted++;
+					}
+					this._markLatestChangeReverted(item);
+					this._acceptedLatestChangeKeys.delete(item.changeKey);
+					continue;
+				}
+
+				const content = readBackupFile(item.sessionId, item.backupFileName);
+				if (content === null) {
+					failed++;
+					continue;
+				}
+				const dir = path.dirname(item.absolutePath);
+				if (!fs.existsSync(dir)) {
+					fs.mkdirSync(dir, { recursive: true });
+				}
+				fs.writeFileSync(item.absolutePath, content, 'utf-8');
+				restored++;
+				this._markLatestChangeReverted(item);
+				this._acceptedLatestChangeKeys.delete(item.changeKey);
+			} catch {
+				failed++;
+			}
+		}
+
+		await this._sendLatestChanges();
+		const summaryParts: string[] = [];
+		if (restored > 0) summaryParts.push(`${restored} restored`);
+		if (deleted > 0) summaryParts.push(`${deleted} deleted`);
+		const summary = summaryParts.join(', ');
+		if (failed > 0) {
+			vscode.window.showWarningMessage(`${summary ? summary + ', ' : ''}${failed} failed.`);
+		} else {
+			vscode.window.showInformationMessage(`Rejected: ${summary || 'nothing changed'}.`);
+		}
+	}
+
+	private _markLatestChangeReverted(item: LatestChangeItem) {
+		this._revertedLatestChangeKeys.add(item.changeKey);
+		this._postMessage({
+			type: 'latestChangeReverted',
+			data: {
+				changeKey: item.changeKey,
+				sessionId: item.sessionId,
+				absolutePath: item.absolutePath,
+			},
+		});
+	}
+
+	private _getLatestChangeKey(sessionId: string, absolutePath: string): string {
+		return `${sessionId}::${absolutePath}`;
+	}
+
+	private _truncateMiddle(text: string, maxLength: number): string {
+		if (text.length <= maxLength || maxLength < 8) {
+			return text;
+		}
+		const visible = maxLength - 3;
+		return `${text.slice(0, Math.ceil(visible / 2))}...${text.slice(-Math.floor(visible / 2))}`;
 	}
 
 	private async _openFileInEditor(filePath: string) {

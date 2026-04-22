@@ -1,0 +1,122 @@
+{
+  "name": "claude-changes",
+  "displayName": "Claude Changes",
+  "description": "Review all file changes made by Claude Code sessions with diffs and one-click revert",
+  "version": "0.6.0",
+  "publisher": "FotisPanokis",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/panfotis/claude-changes"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "checkpoints",
+    "diff",
+    "revert",
+    "AI",
+    "changes"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claude-changes",
+          "title": "Claude Changes",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claude-changes": [
+        {
+          "id": "claudeChanges",
+          "name": "Changes",
+          "type": "webview"
+        },
+        {
+          "id": "claudeChangesLatest",
+          "name": "Latest",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeChanges.refresh",
+        "title": "Refresh Changes",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeChanges.viewDiff",
+        "title": "View Changes",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "claudeChanges.viewFile",
+        "title": "View File",
+        "icon": "$(file)"
+      },
+      {
+        "command": "claudeChanges.restoreFile",
+        "title": "Restore File",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "claudeChanges.refreshLatest",
+        "title": "Refresh Latest",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeChanges.refresh",
+          "when": "view == claudeChanges",
+          "group": "navigation"
+        },
+        {
+          "command": "claudeChanges.refreshLatest",
+          "when": "view == claudeChangesLatest",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeChanges.viewDiff",
+          "when": "view == claudeChanges && viewItem == checkpointFile",
+          "group": "inline"
+        },
+        {
+          "command": "claudeChanges.viewFile",
+          "when": "view == claudeChanges && viewItem == checkpointFile"
+        },
+        {
+          "command": "claudeChanges.restoreFile",
+          "when": "view == claudeChanges && viewItem == checkpointFile"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

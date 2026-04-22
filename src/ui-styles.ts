@@ -937,17 +937,219 @@ const styles = `
     .chat-container {
         flex: 1;
         display: flex;
-        flex-direction: column;
         overflow: hidden;
+        min-height: 0;
+    }
+
+    .chat-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
     }
 
     .messages {
         flex: 1;
+        min-height: 0;
         padding: 10px;
         overflow-y: auto;
         font-family: var(--vscode-editor-font-family);
         font-size: var(--vscode-editor-font-size);
         line-height: 1.4;
+    }
+
+    .latest-changes-panel {
+        width: 320px;
+        min-width: 280px;
+        max-width: 360px;
+        display: flex;
+        flex-direction: column;
+        border-left: 1px solid var(--vscode-panel-border);
+        background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-panel-background));
+        min-height: 0;
+    }
+
+    .latest-changes-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+    }
+
+    .latest-changes-title-wrap {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .latest-changes-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--vscode-foreground);
+    }
+
+    .latest-changes-session {
+        font-size: 10px;
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 180px;
+    }
+
+    .latest-changes-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .latest-changes-btn {
+        background: transparent;
+        color: var(--vscode-foreground);
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        cursor: pointer;
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .latest-changes-btn:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+
+    .latest-changes-btn.danger {
+        color: var(--vscode-errorForeground, #f14c4c);
+        border-color: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 38%, var(--vscode-panel-border));
+    }
+
+    .latest-changes-btn.danger:hover {
+        background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 10%, transparent);
+    }
+
+    .latest-changes-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px;
+    }
+
+    .latest-changes-empty {
+        padding: 16px 10px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground);
+        opacity: 0.8;
+    }
+
+    .latest-change-item {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: start;
+        padding: 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.12s ease;
+        margin-bottom: 2px;
+    }
+
+    .latest-change-item:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+
+    .latest-change-item.reverted {
+        opacity: 0.45;
+        pointer-events: none;
+    }
+
+    .latest-change-icon {
+        width: 18px;
+        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 700;
+        border-radius: 3px;
+        margin-top: 1px;
+    }
+
+    .latest-change-icon.added {
+        color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+    }
+
+    .latest-change-icon.modified {
+        color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+    }
+
+    .latest-change-icon.deleted {
+        color: var(--vscode-gitDecoration-deletedResourceForeground, #f14c4c);
+    }
+
+    .latest-change-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .latest-change-name {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--vscode-foreground);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .latest-change-meta {
+        font-size: 10px;
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .latest-change-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        opacity: 0;
+        transition: opacity 0.12s ease;
+    }
+
+    .latest-change-item:hover .latest-change-actions,
+    .latest-change-item:focus-within .latest-change-actions {
+        opacity: 1;
+    }
+
+    .latest-change-action {
+        background: transparent;
+        color: var(--vscode-foreground);
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: pointer;
+        padding: 3px 6px;
+        font-size: 10px;
+    }
+
+    .latest-change-action:hover {
+        background: var(--vscode-toolbar-hoverBackground);
+        border-color: var(--vscode-panel-border);
+    }
+
+    .latest-change-action.accept:hover {
+        color: var(--vscode-testing-iconPassed, #73c991);
+    }
+
+    .latest-change-action.reject:hover {
+        color: var(--vscode-errorForeground, #f14c4c);
     }
 
     .message {
