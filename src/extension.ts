@@ -4,14 +4,6 @@ import * as util from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
 import getHtml from './ui';
-import {
-	FileBackup,
-	SessionInfo,
-	Snapshot,
-	findSessionsForWorkspace,
-	readBackupFile,
-	findNextBackup,
-} from './checkpointService';
 import { startRouter, stopRouter, setModelConfig, setBaseUrl } from './router';
 import { fetchAndResolveModels } from './model-updater';
 import recommendedModels from './recommended-models.json';
@@ -132,15 +124,27 @@ interface LatestChangeItem {
 	sessionId: string;
 	filePath: string;
 	absolutePath: string;
-	backupFileName: string | null;
-	version: number;
-	backupTime: string;
-	nextBackupFileName: string | null;
-	status: 'added' | 'modified' | 'deleted';
+	status: 'added' | 'modified';
 	fileName: string;
 	directoryLabel: string;
 	timeLabel: string;
 	isReverted: boolean;
+	toolName: 'Edit' | 'Write' | 'MultiEdit';
+	oldContent: string;
+	newContent: string;
+	beforeExists: boolean;
+	updatedAt: number;
+}
+
+interface PendingLatestChange {
+	changeKey: string;
+	sessionId: string;
+	filePath: string;
+	absolutePath: string;
+	toolName: 'Edit' | 'Write' | 'MultiEdit';
+	oldContent: string;
+	beforeExists: boolean;
+	updatedAt: number;
 }
 
 class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
@@ -179,6 +183,7 @@ class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
 
 
 class ClaudeChatProvider {
+	private static readonly LATEST_CHANGES_STATE_KEY = 'claude.latestChanges';
 	public _panel: vscode.WebviewPanel | undefined;
 	private _webview: vscode.Webview | undefined;
 	private _webviewView: vscode.WebviewView | undefined;
@@ -224,6 +229,8 @@ class ClaudeChatProvider {
 	private _draftMessage: string = '';
 	private _revertedLatestChangeKeys: Set<string> = new Set();
 	private _acceptedLatestChangeKeys: Set<string> = new Set();
+	private _pendingLatestChanges: Map<string, PendingLatestChange> = new Map();
+	private _currentLatestChanges: LatestChangeItem[] = [];
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -246,6 +253,7 @@ class ClaudeChatProvider {
 		// Resume session from latest conversation
 		const latestConversation = this._getLatestConversation();
 		this._currentSessionId = latestConversation?.sessionId;
+		this._loadPersistedLatestChanges();
 	}
 
 	public show(column: vscode.ViewColumn | vscode.Uri = vscode.ViewColumn.Two) {
@@ -468,6 +476,9 @@ class ClaudeChatProvider {
 			case 'getWorkspaceFiles':
 				this._sendWorkspaceFiles(message.searchTerm);
 				return;
+			case 'resolveDroppedPaths':
+				this._resolveDroppedPaths(message.paths);
+				return;
 			case 'selectImageFile':
 				this._selectImageFile();
 				return;
@@ -640,6 +651,9 @@ class ClaudeChatProvider {
 				return;
 			case 'acceptLatestChange':
 				this._acceptLatestChange(message.item);
+				return;
+			case 'acceptAllLatestChanges':
+				this._acceptAllLatestChanges();
 				return;
 			case 'rejectAllLatestChanges':
 				this._rejectAllLatestChanges();
@@ -1453,6 +1467,20 @@ class ClaudeChatProvider {
 										// File might not exist yet (for Write), that's ok
 										fileContentBefore = '';
 									}
+
+									const filePath = content.input.file_path as string;
+									const changeKey = `${this._currentSessionId || 'session'}::${filePath}`;
+									const existingChange = this._currentLatestChanges.find(change => change.changeKey === changeKey);
+									this._pendingLatestChanges.set(changeKey, {
+										changeKey,
+										sessionId: this._currentSessionId || 'session',
+										filePath,
+										absolutePath: filePath,
+										toolName: content.name,
+										oldContent: existingChange ? existingChange.oldContent : fileContentBefore,
+										beforeExists: existingChange ? existingChange.beforeExists : fileContentBefore !== '',
+										updatedAt: Date.now(),
+									});
 								}
 							}
 
@@ -1531,6 +1559,39 @@ class ClaudeChatProvider {
 									fileContentAfter = Buffer.from(fileData).toString('utf8');
 								} catch {
 									// File read failed, that's ok
+								}
+
+								const filePath = rawInput.file_path as string;
+								const changeKey = `${this._currentSessionId || 'session'}::${filePath}`;
+								const pending = this._pendingLatestChanges.get(changeKey);
+								if (pending) {
+									this._pendingLatestChanges.delete(changeKey);
+									const dirName = path.dirname(filePath);
+									const directoryLabel = dirName && dirName !== '.' ? this._truncateMiddle(dirName, 36) : '';
+									const item: LatestChangeItem = {
+										changeKey,
+										sessionId: this._currentSessionId || 'session',
+										filePath,
+										absolutePath: filePath,
+										status: pending.beforeExists ? 'modified' : 'added',
+										fileName: path.basename(filePath),
+										directoryLabel,
+										timeLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+										isReverted: false,
+										toolName: pending.toolName,
+										oldContent: pending.oldContent,
+										newContent: fileContentAfter ?? '',
+										beforeExists: pending.beforeExists,
+										updatedAt: Date.now(),
+									};
+									const existingIndex = this._currentLatestChanges.findIndex(change => change.changeKey === changeKey);
+									if (existingIndex >= 0) {
+										this._currentLatestChanges[existingIndex] = item;
+									} else {
+										this._currentLatestChanges.push(item);
+									}
+									this._persistLatestChanges();
+									void this._sendLatestChanges();
 								}
 							}
 
@@ -3092,6 +3153,76 @@ class ClaudeChatProvider {
 		}
 	}
 
+	private _resolveDroppedPaths(paths: string[] | undefined): void {
+		try {
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			if (!workspaceFolder || !Array.isArray(paths) || paths.length === 0) {
+				this._postMessage({ type: 'droppedPathsResolved', data: [] });
+				return;
+			}
+
+			const workspaceRoot = workspaceFolder.uri.fsPath;
+			const resolvedMap = new Map<string, { path: string; isDirectory: boolean }>();
+			for (const rawValue of paths) {
+				if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+					continue;
+				}
+
+				const rawPath = rawValue.trim();
+				const candidates: string[] = [];
+
+				if (!rawPath.startsWith('file:') && !path.isAbsolute(rawPath)) {
+					candidates.push(path.join(workspaceRoot, rawPath));
+				}
+
+				if (rawPath.startsWith('file:')) {
+					try {
+						candidates.push(vscode.Uri.parse(rawPath).fsPath);
+					} catch {
+						// ignore invalid file uri
+					}
+				}
+
+				if (path.isAbsolute(rawPath)) {
+					candidates.push(rawPath);
+				}
+
+				const matchedPath = candidates
+					.map(candidate => path.normalize(candidate))
+					.find(candidate => fs.existsSync(candidate));
+				if (!matchedPath) {
+					continue;
+				}
+
+				const relativePath = vscode.workspace.asRelativePath(vscode.Uri.file(matchedPath), false);
+				if (!relativePath || relativePath === matchedPath || relativePath.startsWith('..')) {
+					continue;
+				}
+
+				let isDirectory = false;
+				try {
+					isDirectory = fs.statSync(matchedPath).isDirectory();
+				} catch {
+					isDirectory = false;
+				}
+
+				const normalizedRelativePath = relativePath.replace(/\\/g, '/');
+				resolvedMap.set(normalizedRelativePath, {
+					path: normalizedRelativePath,
+					isDirectory,
+				});
+			}
+
+			this._postMessage({
+				type: 'droppedPathsResolved',
+				data: Array.from(resolvedMap.values()),
+			});
+		} catch (error) {
+			console.error('Error resolving dropped paths:', error);
+			this._postMessage({ type: 'droppedPathsResolved', data: [] });
+		}
+	}
+
 	private async _selectImageFile(): Promise<void> {
 		try {
 			// Show VS Code's native file picker for images
@@ -3820,110 +3951,32 @@ class ClaudeChatProvider {
 		this._context.globalState.update('wslAlertDismissed', true);
 	}
 
+	private _loadPersistedLatestChanges() {
+		const saved = this._context.workspaceState.get<LatestChangeItem[]>(ClaudeChatProvider.LATEST_CHANGES_STATE_KEY, []);
+		this._currentLatestChanges = Array.isArray(saved) ? saved : [];
+	}
+
+	private _persistLatestChanges() {
+		void this._context.workspaceState.update(ClaudeChatProvider.LATEST_CHANGES_STATE_KEY, this._currentLatestChanges);
+	}
+
 	private async _sendLatestChanges() {
-		try {
-			const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-			if (!workspacePath) {
-				this._postMessage({ type: 'latestChangesData', data: { sessionTitle: '', items: [] } });
-				return;
-			}
-
-			const sessions = await findSessionsForWorkspace(workspacePath);
-			if (sessions.length === 0) {
-				this._postMessage({ type: 'latestChangesData', data: { sessionTitle: '', items: [] } });
-				return;
-			}
-
-			const latestSession = sessions[0];
-			const sessionTitle = latestSession.firstUserMessage || latestSession.slug || latestSession.sessionId.slice(0, 12);
-			const items = this._getLatestChangeItems(latestSession);
-			this._postMessage({
-				type: 'latestChangesData',
-				data: {
-					sessionTitle,
-					items,
-				},
-			});
-		} catch (error) {
-			console.error('Failed to load latest changes:', error);
-			this._postMessage({ type: 'latestChangesData', data: { sessionTitle: '', items: [] } });
-		}
+		const sessionTitle = this._currentSessionId ? `Session ${this._currentSessionId.slice(0, 8)}` : 'Current Session';
+		const items = this._getLatestChangeItems();
+		this._postMessage({
+			type: 'latestChangesData',
+			data: {
+				sessionTitle,
+				items,
+			},
+		});
 	}
 
-	private _getLatestChangeItems(session: SessionInfo): LatestChangeItem[] {
-		if (session.snapshots.length === 0) {
-			return [];
-		}
-
-		const lastSnap = session.snapshots[session.snapshots.length - 1];
-		return lastSnap.files
-			.filter(file => this._hasActualDiff(session, lastSnap, file))
-			.map(file => this._toLatestChangeItem(session, lastSnap, file))
-			.filter(item => !this._acceptedLatestChangeKeys.has(item.changeKey));
+	private _getLatestChangeItems(): LatestChangeItem[] {
+		return this._currentLatestChanges.filter(item => !this._acceptedLatestChangeKeys.has(item.changeKey) && !this._revertedLatestChangeKeys.has(item.changeKey));
 	}
 
-	private _toLatestChangeItem(session: SessionInfo, snapshot: Snapshot, file: FileBackup): LatestChangeItem {
-		const fileExists = fs.existsSync(file.absolutePath);
-		const status: 'added' | 'modified' | 'deleted' = file.backupFileName === null
-			? 'added'
-			: !fileExists
-				? 'deleted'
-				: 'modified';
-		const dirName = path.dirname(file.filePath);
-		const directoryLabel = dirName && dirName !== '.' ? this._truncateMiddle(dirName, 36) : '';
-		const key = this._getLatestChangeKey(session.sessionId, file.absolutePath);
-
-		return {
-			changeKey: key,
-			sessionId: session.sessionId,
-			filePath: file.filePath,
-			absolutePath: file.absolutePath,
-			backupFileName: file.backupFileName,
-			version: file.version,
-			backupTime: file.backupTime,
-			nextBackupFileName: findNextBackup(session, snapshot.messageId, file.filePath),
-			status,
-			fileName: path.basename(file.absolutePath),
-			directoryLabel,
-			timeLabel: new Date(file.backupTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-			isReverted: this._revertedLatestChangeKeys.has(key),
-		};
-	}
-
-	private _hasActualDiff(session: SessionInfo, snapshot: Snapshot, file: FileBackup): boolean {
-		const nextBackup = findNextBackup(session, snapshot.messageId, file.filePath);
-
-		if (file.backupFileName === null) {
-			if (nextBackup) {
-				const nextContent = readBackupFile(session.sessionId, nextBackup);
-				return nextContent === null || nextContent !== '';
-			}
-			if (!fs.existsSync(file.absolutePath)) {
-				return false;
-			}
-			try {
-				return fs.readFileSync(file.absolutePath, 'utf-8') !== '';
-			} catch {
-				return true;
-			}
-		}
-
-		const backup = readBackupFile(session.sessionId, file.backupFileName);
-		if (backup === null) {
-			return true;
-		}
-
-		if (!fs.existsSync(file.absolutePath)) {
-			return backup !== '';
-		}
-
-		try {
-			const current = fs.readFileSync(file.absolutePath, 'utf-8');
-			return backup !== current;
-		} catch {
-			return true;
-		}
-	}
+	// Latest changes are now tracked from current-session Edit/Write/MultiEdit tool flow.
 
 	private async _openLatestChangeDiff(item: LatestChangeItem | undefined) {
 		if (!item) {
@@ -3931,27 +3984,7 @@ class ClaudeChatProvider {
 		}
 
 		try {
-			const fileName = path.basename(item.absolutePath);
-			let oldContent = '';
-			let newContent = '';
-
-			if (item.backupFileName === null) {
-				oldContent = '';
-				if (item.nextBackupFileName) {
-					newContent = readBackupFile(item.sessionId, item.nextBackupFileName) ?? '';
-				} else if (fs.existsSync(item.absolutePath)) {
-					newContent = fs.readFileSync(item.absolutePath, 'utf-8');
-				}
-			} else {
-				oldContent = readBackupFile(item.sessionId, item.backupFileName) ?? '';
-				if (item.nextBackupFileName) {
-					newContent = readBackupFile(item.sessionId, item.nextBackupFileName) ?? '';
-				} else if (fs.existsSync(item.absolutePath)) {
-					newContent = fs.readFileSync(item.absolutePath, 'utf-8');
-				}
-			}
-
-			await this._openDiffEditor(oldContent, newContent, item.absolutePath || fileName);
+			await this._openDiffEditor(item.oldContent, item.newContent, item.absolutePath);
 		} catch (error) {
 			console.error('Error opening latest change diff:', error);
 			vscode.window.showErrorMessage('Failed to open latest change diff');
@@ -3965,9 +3998,9 @@ class ClaudeChatProvider {
 
 		const fileName = path.basename(item.absolutePath);
 
-		if (!item.backupFileName) {
+		if (!item.beforeExists) {
 			const confirmDelete = await vscode.window.showWarningMessage(
-				`Delete ${fileName}? This file was created by Claude and will be permanently deleted.`,
+				`Delete ${fileName}? This file was created in the current session and will be permanently deleted.`,
 				{ modal: true },
 				'Delete'
 			);
@@ -3978,8 +4011,11 @@ class ClaudeChatProvider {
 				if (fs.existsSync(item.absolutePath)) {
 					fs.unlinkSync(item.absolutePath);
 				}
-				this._markLatestChangeReverted(item);
+				this._currentLatestChanges = this._currentLatestChanges.filter(change => change.changeKey !== item.changeKey);
+				this._pendingLatestChanges.delete(item.changeKey);
 				this._acceptedLatestChangeKeys.delete(item.changeKey);
+				this._revertedLatestChangeKeys.delete(item.changeKey);
+				this._persistLatestChanges();
 				await this._sendLatestChanges();
 				vscode.window.showInformationMessage(`Deleted ${fileName}`);
 			} catch (error: any) {
@@ -3989,7 +4025,7 @@ class ClaudeChatProvider {
 		}
 
 		const confirmRestore = await vscode.window.showWarningMessage(
-			`Restore ${fileName} to checkpoint v${item.version}? This will overwrite the current file.`,
+			`Restore ${fileName} to its pre-edit content? This will overwrite the current file.`,
 			{ modal: true },
 			'Restore'
 		);
@@ -3997,11 +4033,7 @@ class ClaudeChatProvider {
 			return;
 		}
 
-		const content = readBackupFile(item.sessionId, item.backupFileName);
-		if (content === null) {
-			vscode.window.showErrorMessage(`Could not read backup file: ${item.backupFileName}`);
-			return;
-		}
+		const content = item.oldContent;
 
 		try {
 			const dir = path.dirname(item.absolutePath);
@@ -4012,7 +4044,7 @@ class ClaudeChatProvider {
 			this._markLatestChangeReverted(item);
 			this._acceptedLatestChangeKeys.delete(item.changeKey);
 			await this._sendLatestChanges();
-			vscode.window.showInformationMessage(`Restored ${fileName} to checkpoint v${item.version}`);
+			vscode.window.showInformationMessage(`Restored ${fileName}`);
 		} catch (error: any) {
 			vscode.window.showErrorMessage(`Failed to restore file: ${error.message}`);
 		}
@@ -4022,33 +4054,39 @@ class ClaudeChatProvider {
 		if (!item) {
 			return;
 		}
-		this._acceptedLatestChangeKeys.add(item.changeKey);
+		this._currentLatestChanges = this._currentLatestChanges.filter(change => change.changeKey !== item.changeKey);
+		this._pendingLatestChanges.delete(item.changeKey);
+		this._acceptedLatestChangeKeys.delete(item.changeKey);
 		this._revertedLatestChangeKeys.delete(item.changeKey);
 		await this._sendLatestChanges();
 		vscode.window.showInformationMessage(`Accepted current changes for ${path.basename(item.absolutePath)}`);
 	}
 
+	private async _acceptAllLatestChanges() {
+		const items = this._currentLatestChanges.filter(item => !this._acceptedLatestChangeKeys.has(item.changeKey) && !this._revertedLatestChangeKeys.has(item.changeKey));
+		if (items.length === 0) {
+			vscode.window.showInformationMessage('No files to accept.');
+			return;
+		}
+
+		this._currentLatestChanges = [];
+		this._pendingLatestChanges.clear();
+		this._acceptedLatestChangeKeys.clear();
+		this._revertedLatestChangeKeys.clear();
+		this._persistLatestChanges();
+		await this._sendLatestChanges();
+		vscode.window.showInformationMessage(`Accepted all changes (${items.length} file${items.length === 1 ? '' : 's'}).`);
+	}
+
 	private async _rejectAllLatestChanges() {
-		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-		if (!workspacePath) {
-			return;
-		}
-
-		const sessions = await findSessionsForWorkspace(workspacePath);
-		if (sessions.length === 0) {
-			vscode.window.showInformationMessage('No sessions found.');
-			return;
-		}
-
-		const latestSession = sessions[0];
-		const items = this._getLatestChangeItems(latestSession);
+		const items = this._currentLatestChanges.filter(item => !this._acceptedLatestChangeKeys.has(item.changeKey) && !this._revertedLatestChangeKeys.has(item.changeKey));
 		if (items.length === 0) {
 			vscode.window.showInformationMessage('No files to reject.');
 			return;
 		}
 
-		const modifiedCount = items.filter(item => item.backupFileName !== null).length;
-		const createdCount = items.filter(item => item.backupFileName === null && fs.existsSync(item.absolutePath)).length;
+		const modifiedCount = items.filter(item => item.beforeExists).length;
+		const createdCount = items.filter(item => !item.beforeExists && fs.existsSync(item.absolutePath)).length;
 		const parts: string[] = [];
 		if (modifiedCount > 0) parts.push(`restore ${modifiedCount} modified`);
 		if (createdCount > 0) parts.push(`delete ${createdCount} created`);
@@ -4068,7 +4106,7 @@ class ClaudeChatProvider {
 
 		for (const item of items) {
 			try {
-				if (item.backupFileName === null) {
+				if (!item.beforeExists) {
 					if (fs.existsSync(item.absolutePath)) {
 						fs.unlinkSync(item.absolutePath);
 						deleted++;
@@ -4078,16 +4116,11 @@ class ClaudeChatProvider {
 					continue;
 				}
 
-				const content = readBackupFile(item.sessionId, item.backupFileName);
-				if (content === null) {
-					failed++;
-					continue;
-				}
 				const dir = path.dirname(item.absolutePath);
 				if (!fs.existsSync(dir)) {
 					fs.mkdirSync(dir, { recursive: true });
 				}
-				fs.writeFileSync(item.absolutePath, content, 'utf-8');
+				fs.writeFileSync(item.absolutePath, item.oldContent, 'utf-8');
 				restored++;
 				this._markLatestChangeReverted(item);
 				this._acceptedLatestChangeKeys.delete(item.changeKey);
@@ -4118,10 +4151,6 @@ class ClaudeChatProvider {
 				absolutePath: item.absolutePath,
 			},
 		});
-	}
-
-	private _getLatestChangeKey(sessionId: string, absolutePath: string): string {
-		return `${sessionId}::${absolutePath}`;
 	}
 
 	private _truncateMiddle(text: string, maxLength: number): string {

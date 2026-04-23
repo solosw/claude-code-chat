@@ -947,6 +947,7 @@ const styles = `
         flex-direction: column;
         min-width: 0;
         min-height: 0;
+        overflow: hidden;
     }
 
     .messages {
@@ -960,14 +961,27 @@ const styles = `
     }
 
     .latest-changes-panel {
-        width: 320px;
-        min-width: 280px;
-        max-width: 360px;
+        --latest-changes-height: 220px;
+        height: var(--latest-changes-height);
+        min-height: 56px;
+        max-height: min(45vh, 420px);
         display: flex;
         flex-direction: column;
-        border-left: 1px solid var(--vscode-panel-border);
+        border-bottom: 1px solid var(--vscode-panel-border);
         background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-panel-background));
-        min-height: 0;
+        flex-shrink: 0;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .latest-changes-panel.collapsed {
+        height: 44px;
+        min-height: 44px;
+    }
+
+    .latest-changes-panel.collapsed .latest-changes-list,
+    .latest-changes-panel.collapsed .latest-changes-resize-handle {
+        display: none;
     }
 
     .latest-changes-header {
@@ -978,6 +992,7 @@ const styles = `
         padding: 10px 12px;
         border-bottom: 1px solid var(--vscode-panel-border);
         background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+        flex-shrink: 0;
     }
 
     .latest-changes-title-wrap {
@@ -985,6 +1000,33 @@ const styles = `
         display: flex;
         flex-direction: column;
         gap: 2px;
+    }
+
+    .latest-changes-title-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .latest-changes-collapse-btn {
+        background: transparent;
+        color: var(--vscode-foreground);
+        border: none;
+        cursor: pointer;
+        padding: 0 2px;
+        font-size: 12px;
+        line-height: 1;
+        opacity: 0.8;
+        flex-shrink: 0;
+    }
+
+    .latest-changes-collapse-btn:hover {
+        opacity: 1;
+    }
+
+    .latest-changes-panel.collapsed .latest-changes-collapse-btn {
+        transform: rotate(-90deg);
     }
 
     .latest-changes-title {
@@ -999,7 +1041,7 @@ const styles = `
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 180px;
+        max-width: 320px;
     }
 
     .latest-changes-header-actions {
@@ -1030,6 +1072,27 @@ const styles = `
 
     .latest-changes-btn.danger:hover {
         background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 10%, transparent);
+    }
+
+    .latest-changes-resize-handle {
+        height: 6px;
+        cursor: row-resize;
+        background: transparent;
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .latest-changes-resize-handle::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 2px;
+        transform: translateX(-50%);
+        width: 36px;
+        height: 2px;
+        border-radius: 999px;
+        background: var(--vscode-panel-border);
+        opacity: 0.8;
     }
 
     .latest-changes-list {
@@ -2541,6 +2604,30 @@ const styles = `
 
     .yolo-suggestion-btn:hover {
         background-color: var(--vscode-button-hoverBackground);
+    }
+
+    .drop-zone-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: rgba(0, 0, 0, 0.08);
+        border: 2px dashed var(--vscode-focusBorder, #007acc);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+        box-sizing: border-box;
+    }
+
+    .drop-zone-overlay-content {
+        padding: 16px 24px;
+        border-radius: 10px;
+        background: var(--vscode-editorWidget-background, rgba(30, 30, 30, 0.95));
+        border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+        color: var(--vscode-foreground);
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     }
 
     .file-picker-modal {

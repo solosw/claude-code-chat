@@ -47,6 +47,26 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 
 	<div class="chat-container" id="chatContainer">
 		<div class="chat-main">
+			<section class="latest-changes-panel" id="latestChangesPanel">
+				<div class="latest-changes-header">
+					<div class="latest-changes-title-wrap">
+						<div class="latest-changes-title-row">
+							<button class="latest-changes-collapse-btn" id="latestChangesCollapseBtn" onclick="toggleLatestChangesPanel()" title="Collapse latest changes">▾</button>
+							<div class="latest-changes-title">Latest Changes</div>
+						</div>
+						<div class="latest-changes-session" id="latestChangesSession"></div>
+					</div>
+					<div class="latest-changes-header-actions">
+						<button class="latest-changes-btn" onclick="acceptAllLatestChanges()" title="Accept all latest changes">Accept All</button>
+						<button class="latest-changes-btn danger" onclick="rejectAllLatestChanges()" title="Reject all latest changes">Reject All</button>
+						<button class="latest-changes-btn" onclick="refreshLatestChanges()" title="Refresh latest changes">↻</button>
+					</div>
+				</div>
+				<div class="latest-changes-resize-handle" id="latestChangesResizeHandle" title="Drag to resize latest changes panel"></div>
+				<div class="latest-changes-list" id="latestChangesList">
+					<div class="latest-changes-empty">Loading latest changes...</div>
+				</div>
+			</section>
 			<div class="messages" id="messages"></div>
 			
 			<!-- WSL Alert for Windows users -->
@@ -136,22 +156,6 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 				</div>
 			</div>
 		</div>
-
-		<aside class="latest-changes-panel" id="latestChangesPanel">
-			<div class="latest-changes-header">
-				<div class="latest-changes-title-wrap">
-					<div class="latest-changes-title">Latest Changes</div>
-					<div class="latest-changes-session" id="latestChangesSession"></div>
-				</div>
-				<div class="latest-changes-header-actions">
-					<button class="latest-changes-btn danger" onclick="rejectAllLatestChanges()" title="Reject all latest changes">Reject All</button>
-					<button class="latest-changes-btn" onclick="refreshLatestChanges()" title="Refresh latest changes">↻</button>
-				</div>
-			</div>
-			<div class="latest-changes-list" id="latestChangesList">
-				<div class="latest-changes-empty">Loading latest changes...</div>
-			</div>
-		</aside>
 	</div>
 	
 	<div class="status ready" id="status">
@@ -166,6 +170,12 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 			<div id="yoloWarning" class="yolo-warning" style="display: none;">
 			⚠️ Yolo Mode Active: Claude Code will auto-approve all tool requests.
 		</div>
+
+	<div id="dropZoneOverlay" class="drop-zone-overlay" style="display: none;">
+		<div class="drop-zone-overlay-content">
+			Drop files or folders to reference them
+		</div>
+	</div>
 
 	<!-- File picker modal -->
 	<div id="filePickerModal" class="file-picker-modal" style="display: none;">
