@@ -194,7 +194,32 @@
         "claudeCodeChat.environment.variables": {
           "type": "object",
           "default": {},
-          "description": "Custom environment variables to pass to Claude Code. Example: {\"ANTHROPIC_API_KEY\": \"sk-...\"}"
+          "description": "Active environment variables to pass to Claude Code. This value is synchronized with the selected preset."
+        },
+        "claudeCodeChat.environment.presets": {
+          "type": "array",
+          "default": [],
+          "description": "Named environment variable preset groups for quickly switching between providers or accounts.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "variables": {
+                "type": "object",
+                "default": {}
+              }
+            }
+          }
+        },
+        "claudeCodeChat.environment.activePresetId": {
+          "type": "string",
+          "default": "",
+          "description": "The active environment variable preset ID."
         },
         "claudeCodeChat.environment.disabled": {
           "type": "boolean",

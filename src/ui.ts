@@ -27,7 +27,11 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 				<span class="session-label">session</span>
 			</div> -->
 		</div>
-		<div style="display: flex; gap: 8px; align-items: center;">
+		<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
+			<div id="chatEnvSwitcher" class="chat-env-switcher" style="display: none;">
+				<label for="chatEnvPresetSelect" class="chat-env-label">Env</label>
+				<select id="chatEnvPresetSelect" class="chat-env-select" onchange="handleChatEnvPresetChange()"></select>
+			</div>
 			<div id="sessionStatus" class="session-status" style="display: none;">No session</div>
 			<button class="btn outlined" id="settingsBtn" onclick="toggleSettings()" title="Settings">⚙️</button>
 			<button class="btn outlined" id="historyBtn" onclick="toggleConversationHistory()">📚 History</button>
@@ -413,6 +417,14 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 							<label id="envsLabel" style="font-size: 12px; color: var(--vscode-descriptionForeground);">Environment Variables</label>
 							<button id="envsToggleBtn" style="display: none; font-size: 10px; padding: 2px 10px; border-radius: 4px; border: 1px solid var(--vscode-panel-border); background: none; color: var(--vscode-descriptionForeground); cursor: pointer;"></button>
 						</div>
+						<div class="env-presets-toolbar">
+							<select id="envPresetSelect" class="env-preset-select" onchange="handleEnvPresetChange()"></select>
+							<button class="permissions-show-add-btn" onclick="createEnvPreset()">+ New Group</button>
+							<button class="permissions-show-add-btn" onclick="saveCurrentEnvPreset()">Save Group</button>
+							<button class="permissions-show-add-btn" onclick="deleteCurrentEnvPreset()">Delete Group</button>
+						</div>
+						<input type="text" id="envPresetName" class="file-search-input env-preset-name" placeholder="Environment group name" onchange="updateEnvPresetName()">
+						<div id="envPresetHint" class="env-preset-hint">Each group includes token, base URL, and model routing variables.</div>
 						<div id="env-variables-list" class="env-variables-list"></div>
 						<button class="permissions-show-add-btn" style="margin-top: 8px;" onclick="addEnvVariable()">+ Add Variable</button>
 					</div>

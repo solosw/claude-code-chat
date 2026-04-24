@@ -33,18 +33,26 @@ export function activate(context: vscode.ExtensionContext) {
 		// OPENCREDITS_WEB_URL = 'http://localhost:3000';
 		// OPENCREDITS_PUBLISHABLE_KEY = 'oc_pk_c78315e9ff3a425ebca398bb69282429';
 	}
-	const provider = new ClaudeChatProvider(context.extensionUri, context);
+	const sidebarProvider = new ClaudeChatProvider(context.extensionUri, context, { kind: 'sidebar', restoreLatestConversation: true });
+	const panelProviders = new Set<ClaudeChatProvider>();
 
 	const disposable = vscode.commands.registerCommand('claude-code-chat.openChat', (column?: vscode.ViewColumn) => {
-		provider.show(column);
+		const panelProvider = new ClaudeChatProvider(context.extensionUri, context, { kind: 'panel', restoreLatestConversation: false });
+		panelProviders.add(panelProvider);
+		panelProvider.show(column);
+		const originalDispose = panelProvider.dispose.bind(panelProvider);
+		panelProvider.dispose = () => {
+			panelProviders.delete(panelProvider);
+			originalDispose();
+		};
 	});
 
 	const loadConversationDisposable = vscode.commands.registerCommand('claude-code-chat.loadConversation', (filename: string) => {
-		provider.loadConversation(filename);
+		sidebarProvider.loadConversation(filename);
 	});
 
 	// Register webview view provider for sidebar chat (using shared provider instance)
-	const webviewProvider = new ClaudeChatWebviewProvider(context.extensionUri, provider);
+	const webviewProvider = new ClaudeChatWebviewProvider(context.extensionUri, sidebarProvider);
 	vscode.window.registerWebviewViewProvider('claude-code-chat.chat', webviewProvider);
 
 	// Register custom content provider for read-only diff views
@@ -54,7 +62,10 @@ export function activate(context: vscode.ExtensionContext) {
 	// Listen for configuration changes
 	const configChangeDisposable = vscode.workspace.onDidChangeConfiguration(event => {
 		if (event.affectsConfiguration('claudeCodeChat.wsl')) {
-			provider.newSessionOnConfigChange();
+			sidebarProvider.newSessionOnConfigChange();
+			for (const panelProvider of panelProviders) {
+				panelProvider.newSessionOnConfigChange();
+			}
 		}
 	});
 
@@ -82,14 +93,15 @@ export function activate(context: vscode.ExtensionContext) {
 					envVars['ANTHROPIC_BASE_URL'] = OPENCREDITS_API_URL;
 
 					await config.update('environment.variables', envVars, vscode.ConfigurationTarget.Global);
+					await sidebarProvider._writeUserClaudeEnv(sidebarProvider._normalizeEnvPresetVariables(envVars));
 
 					// Handle pending model activation after payment
-					await provider.handleOpenCreditsKeyReceived(key);
+					await sidebarProvider.handleOpenCreditsKeyReceived(key);
 
 					// Show success message
 					vscode.window.showInformationMessage('OpenCredits account connected! You can now use Claude Code Chat.', 'Open Chat').then(selection => {
 						if (selection === 'Open Chat') {
-							provider.show();
+							sidebarProvider.show();
 						}
 					});
 				}
@@ -147,6 +159,26 @@ interface PendingLatestChange {
 	updatedAt: number;
 }
 
+interface ClaudeChatProviderOptions {
+	kind: 'sidebar' | 'panel';
+	restoreLatestConversation: boolean;
+}
+
+interface EnvPresetVariables {
+	ANTHROPIC_AUTH_TOKEN: string;
+	ANTHROPIC_BASE_URL: string;
+	ANTHROPIC_DEFAULT_OPUS_MODEL: string;
+	ANTHROPIC_DEFAULT_SONNET_MODEL: string;
+	ANTHROPIC_SMALL_FAST_MODEL: string;
+	[key: string]: string;
+}
+
+interface EnvPreset {
+	id: string;
+	name: string;
+	variables: EnvPresetVariables;
+}
+
 class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -170,11 +202,6 @@ class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
 		// Handle visibility changes to reinitialize when sidebar reopens
 		webviewView.onDidChangeVisibility(() => {
 			if (webviewView.visible) {
-				// Close main panel when sidebar becomes visible
-				if (this._chatProvider._panel) {
-					this._chatProvider._panel.dispose();
-					this._chatProvider._panel = undefined;
-				}
 				this._chatProvider.reinitializeWebview();
 			}
 		});
@@ -234,7 +261,8 @@ class ClaudeChatProvider {
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
-		private readonly _context: vscode.ExtensionContext
+		private readonly _context: vscode.ExtensionContext,
+		private readonly _options: ClaudeChatProviderOptions
 	) {
 
 		// Initialize backup repository and conversations
@@ -250,18 +278,16 @@ class ClaudeChatProvider {
 		// Load cached subscription type (will be refreshed on first message)
 		this._subscriptionType = this._context.globalState.get('claude.subscriptionType');
 
-		// Resume session from latest conversation
-		const latestConversation = this._getLatestConversation();
-		this._currentSessionId = latestConversation?.sessionId;
+		if (this._options.restoreLatestConversation) {
+			const latestConversation = this._getLatestConversation();
+			this._currentSessionId = latestConversation?.sessionId;
+		}
 		this._loadPersistedLatestChanges();
 	}
 
 	public show(column: vscode.ViewColumn | vscode.Uri = vscode.ViewColumn.Two) {
 		// Handle case where a URI is passed instead of ViewColumn
 		const actualColumn = column instanceof vscode.Uri ? vscode.ViewColumn.Two : column;
-
-		// Close sidebar if it's open
-		this._closeSidebar();
 
 		if (this._panel) {
 			this._panel.reveal(actualColumn);
@@ -290,18 +316,14 @@ class ClaudeChatProvider {
 		this._setupWebviewMessageHandler(this._panel.webview);
 		this._initializePermissions();
 
-		// Resume session from latest conversation
-		const latestConversation = this._getLatestConversation();
+		const latestConversation = this._options.restoreLatestConversation ? this._getLatestConversation() : undefined;
 		this._currentSessionId = latestConversation?.sessionId;
 
-		// Load latest conversation history if available
 		if (latestConversation) {
 			this._loadConversationHistory(latestConversation.filename);
 		}
 
-		// Send ready message immediately
 		setTimeout(() => {
-			// If no conversation to load, send ready immediately
 			if (!latestConversation) {
 				this._sendReadyMessage();
 			}
@@ -339,6 +361,62 @@ class ClaudeChatProvider {
 	}
 
 	private static readonly OC_KEY_SECRET = 'opencredits.userKey';
+	private static readonly REQUIRED_ENV_PRESET_KEYS = [
+		'ANTHROPIC_AUTH_TOKEN',
+		'ANTHROPIC_BASE_URL',
+		'ANTHROPIC_DEFAULT_OPUS_MODEL',
+		'ANTHROPIC_DEFAULT_SONNET_MODEL',
+		'ANTHROPIC_SMALL_FAST_MODEL'
+	] as const;
+
+	private _createEmptyEnvPresetVariables(): EnvPresetVariables {
+		return {
+			ANTHROPIC_AUTH_TOKEN: '',
+			ANTHROPIC_BASE_URL: '',
+			ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+			ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+			ANTHROPIC_SMALL_FAST_MODEL: ''
+		};
+	}
+
+	public _normalizeEnvPresetVariables(variables: Record<string, string> | undefined): EnvPresetVariables {
+		const normalized: EnvPresetVariables = {
+			...this._createEmptyEnvPresetVariables()
+		};
+		for (const [key, value] of Object.entries(variables || {})) {
+			normalized[key] = typeof value === 'string' ? value : String(value ?? '');
+		}
+		if (!normalized['ANTHROPIC_SMALL_FAST_MODEL'] && normalized['ANTHROPIC_DEFAULT_HAIKU_MODEL']) {
+			normalized['ANTHROPIC_SMALL_FAST_MODEL'] = normalized['ANTHROPIC_DEFAULT_HAIKU_MODEL'];
+		}
+		if (!normalized['ANTHROPIC_DEFAULT_HAIKU_MODEL'] && normalized['ANTHROPIC_SMALL_FAST_MODEL']) {
+			normalized['ANTHROPIC_DEFAULT_HAIKU_MODEL'] = normalized['ANTHROPIC_SMALL_FAST_MODEL'];
+		}
+		return normalized;
+	}
+
+	private _getEnvPresets(config: vscode.WorkspaceConfiguration): EnvPreset[] {
+		const presets = config.get<any[]>('environment.presets', []);
+		return (presets || []).map((preset, index) => ({
+			id: typeof preset?.id === 'string' && preset.id ? preset.id : 'preset-' + index,
+			name: typeof preset?.name === 'string' && preset.name ? preset.name : 'Preset ' + (index + 1),
+			variables: this._normalizeEnvPresetVariables(preset?.variables || {})
+		}));
+	}
+
+	private async _saveEnvPresets(config: vscode.WorkspaceConfiguration, presets: EnvPreset[]): Promise<void> {
+		await config.update('environment.presets', presets, vscode.ConfigurationTarget.Global);
+	}
+
+	private async _setActiveEnvPreset(config: vscode.WorkspaceConfiguration, presetId: string): Promise<EnvPresetVariables> {
+		const presets = this._getEnvPresets(config);
+		const preset = presets.find(item => item.id === presetId);
+		const normalizedVariables = this._normalizeEnvPresetVariables(preset?.variables || {});
+		await config.update('environment.activePresetId', presetId, vscode.ConfigurationTarget.Global);
+		await config.update('environment.variables', normalizedVariables, vscode.ConfigurationTarget.Global);
+		await this._writeUserClaudeEnv(normalizedVariables);
+		return normalizedVariables;
+	}
 
 	private async _saveOpenCreditsKey(key: string) {
 		await this._context.secrets.store(ClaudeChatProvider.OC_KEY_SECRET, key);
@@ -497,6 +575,15 @@ class ClaudeChatProvider {
 				this._postMessage({ type: 'envVarsData', data: evVars });
 				return;
 			}
+			case 'saveEnvPreset':
+				await this._saveEnvPreset(message.preset);
+				return;
+			case 'deleteEnvPreset':
+				await this._deleteEnvPreset(message.presetId);
+				return;
+			case 'setActiveEnvPreset':
+				await this._activateEnvPreset(message.presetId);
+				return;
 			case 'setEnvsDisabled':
 				await this._setEnvsDisabled(!!message.disabled);
 				return;
@@ -542,11 +629,12 @@ class ClaudeChatProvider {
 				if (message.key) {
 					// Save the key and OpenCredits env vars (same as URI handler)
 					const checkoutConfig = vscode.workspace.getConfiguration('claudeCodeChat');
-					const checkoutEnvVars = checkoutConfig.get<Record<string, string>>('environment.variables', {});
+					const checkoutEnvVars = this._normalizeEnvPresetVariables(checkoutConfig.get<Record<string, string>>('environment.variables', {}));
 					checkoutEnvVars['ANTHROPIC_AUTH_TOKEN'] = message.key;
 					checkoutEnvVars['ANTHROPIC_BASE_URL'] = OPENCREDITS_API_URL;
 					checkoutConfig.update('environment.variables', checkoutEnvVars, vscode.ConfigurationTarget.Global).then(
-						() => {
+						async () => {
+							await this._writeUserClaudeEnv(checkoutEnvVars);
 							this.handleOpenCreditsKeyReceived(message.key);
 						},
 						(err: Error) => {
@@ -574,10 +662,11 @@ class ClaudeChatProvider {
 				const savedKey = await this._getSavedOpenCreditsKey();
 				if (savedKey) {
 					const restoreConfig = vscode.workspace.getConfiguration('claudeCodeChat');
-					const restoreEnvVars = restoreConfig.get<Record<string, string>>('environment.variables', {});
+					const restoreEnvVars = this._normalizeEnvPresetVariables(restoreConfig.get<Record<string, string>>('environment.variables', {}));
 					restoreEnvVars['ANTHROPIC_AUTH_TOKEN'] = savedKey;
 					restoreEnvVars['ANTHROPIC_BASE_URL'] = OPENCREDITS_API_URL;
 					await restoreConfig.update('environment.variables', restoreEnvVars, vscode.ConfigurationTarget.Global);
+					await this._writeUserClaudeEnv(restoreEnvVars);
 					await this.handleOpenCreditsKeyReceived(savedKey);
 				}
 				return;
@@ -590,10 +679,11 @@ class ClaudeChatProvider {
 			case 'saveCustomProvider':
 				if (message.envVars) {
 					const cpConfig = vscode.workspace.getConfiguration('claudeCodeChat');
-					const cpEnvVars = cpConfig.get<Record<string, string>>('environment.variables', {});
+					const cpEnvVars = this._normalizeEnvPresetVariables(cpConfig.get<Record<string, string>>('environment.variables', {}));
 					Object.assign(cpEnvVars, message.envVars);
 					cpConfig.update('environment.variables', cpEnvVars, vscode.ConfigurationTarget.Global).then(
-						() => {
+						async () => {
+							await this._writeUserClaudeEnv(cpEnvVars);
 							this._postMessage({ type: 'customProviderSaved' });
 						},
 						(err: Error) => {
@@ -773,15 +863,12 @@ class ClaudeChatProvider {
 	}
 
 	private _initializeWebview() {
-		// Resume session from latest conversation
-		const latestConversation = this._getLatestConversation();
+		const latestConversation = this._options.restoreLatestConversation ? this._getLatestConversation() : undefined;
 		this._currentSessionId = latestConversation?.sessionId;
 
-		// Load latest conversation history if available
 		if (latestConversation) {
 			this._loadConversationHistory(latestConversation.filename);
 		} else {
-			// If no conversation to load, send ready immediately
 			setTimeout(() => {
 				this._sendReadyMessage();
 			}, 100);
@@ -2705,6 +2792,39 @@ class ClaudeChatProvider {
 		}
 	}
 
+	private _getUserClaudeSettingsPath(): string | undefined {
+		const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+		return homeDir ? path.join(homeDir, '.claude', 'settings.json') : undefined;
+	}
+
+	private async _readUserClaudeSettings(): Promise<any> {
+		const settingsPath = this._getUserClaudeSettingsPath();
+		if (!settingsPath) { return {}; }
+		try {
+			const content = await vscode.workspace.fs.readFile(vscode.Uri.file(settingsPath));
+			return JSON.parse(new TextDecoder().decode(content));
+		} catch {
+			return {};
+		}
+	}
+
+	private async _writeUserClaudeSettings(settings: any): Promise<void> {
+		const settingsPath = this._getUserClaudeSettingsPath();
+		if (!settingsPath) { return; }
+		const dirPath = path.dirname(settingsPath);
+		await vscode.workspace.fs.createDirectory(vscode.Uri.file(dirPath));
+		await vscode.workspace.fs.writeFile(
+			vscode.Uri.file(settingsPath),
+			new TextEncoder().encode(JSON.stringify(settings, null, 2) + '\n')
+		);
+	}
+
+	public async _writeUserClaudeEnv(envVars: Record<string, string>): Promise<void> {
+		const settings = await this._readUserClaudeSettings();
+		settings.env = { ...envVars };
+		await this._writeUserClaudeSettings(settings);
+	}
+
 	private async _writeClaudeSettings(settings: any): Promise<void> {
 		const settingsPath = await this._getClaudeSettingsPath();
 		if (!settingsPath) { return; }
@@ -3355,6 +3475,24 @@ class ClaudeChatProvider {
 		this._sendOpenCreditsBalance();
 	}
 
+	private async _restartClaudeProcessPreservingSession(message?: string): Promise<void> {
+		this._isProcessing = false;
+		this._postMessage({
+			type: 'setProcessing',
+			data: { isProcessing: false }
+		});
+		await this._killClaudeProcess();
+		this._postMessage({
+			type: 'clearLoading'
+		});
+		if (message) {
+			this._sendAndSaveMessage({
+				type: 'system',
+				data: message
+			});
+		}
+	}
+
 	private _updateConversationIndex(filename: string, conversationData: ConversationData): void {
 		// Extract first and last user messages
 		const userMessages = conversationData.messages.filter((m: any) => m.messageType === 'userInput');
@@ -3527,7 +3665,9 @@ class ClaudeChatProvider {
 			'permissions.yoloMode': config.get<boolean>('permissions.yoloMode', false),
 			'router.enabled': config.get<boolean>('router.enabled', false),
 			'executable.path': config.get<string>('executable.path', ''),
-			'environment.variables': config.get<Record<string, string>>('environment.variables', {}),
+			'environment.variables': this._normalizeEnvPresetVariables(config.get<Record<string, string>>('environment.variables', {})),
+			'environment.presets': this._getEnvPresets(config),
+			'environment.activePresetId': config.get<string>('environment.activePresetId', ''),
 			'environment.disabled': config.get<boolean>('environment.disabled', false),
 			'isOpenCredits': this._isOpenCredits()
 		};
@@ -3565,26 +3705,34 @@ class ClaudeChatProvider {
 		try {
 			for (const [key, value] of Object.entries(settings)) {
 				if (key === 'permissions.yoloMode') {
-					// YOLO mode: try workspace first, fall back to global
 					try {
 						await config.update(key, value, vscode.ConfigurationTarget.Workspace);
 					} catch {
 						await config.update(key, value, vscode.ConfigurationTarget.Global);
 					}
+				} else if (key === 'environment.variables') {
+					const normalizedEnvVars = this._normalizeEnvPresetVariables(value || {});
+					await config.update(key, normalizedEnvVars, vscode.ConfigurationTarget.Global);
+					await this._writeUserClaudeEnv(normalizedEnvVars);
+					const activePresetId = config.get<string>('environment.activePresetId', '');
+					if (activePresetId) {
+						const presets = this._getEnvPresets(config);
+						const updatedPresets = presets.map(preset => preset.id === activePresetId
+							? { ...preset, variables: this._normalizeEnvPresetVariables(normalizedEnvVars) }
+							: preset
+						);
+						await this._saveEnvPresets(config, updatedPresets);
+					}
 				} else {
-					// Other settings are global (user-wide)
 					await config.update(key, value, vscode.ConfigurationTarget.Global);
 				}
 			}
 
-			// Re-send settings so webview gets updated isOpenCredits flag, etc.
 			this._sendCurrentSettings();
 
-			// Update balance display based on new env vars
 			if (this._isOpenCredits() || this._getOpenCreditsKey()) {
 				this._sendOpenCreditsBalance();
 			} else {
-				// Clear balance if no longer OpenCredits
 				this._postMessage({
 					type: 'opencreditsBalance',
 					balance: null
@@ -3594,6 +3742,51 @@ class ClaudeChatProvider {
 			console.error('Failed to update settings:', error?.message || error);
 			vscode.window.showErrorMessage(`Failed to update settings: ${error?.message || 'Unknown error'}`);
 		}
+	}
+
+	private async _saveEnvPreset(preset: Partial<EnvPreset> | undefined): Promise<void> {
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const presets = this._getEnvPresets(config);
+		const presetId = typeof preset?.id === 'string' && preset.id ? preset.id : 'preset-' + Date.now();
+		const normalizedPreset: EnvPreset = {
+			id: presetId,
+			name: typeof preset?.name === 'string' && preset.name.trim() ? preset.name.trim() : 'New Preset',
+			variables: this._normalizeEnvPresetVariables(preset?.variables || {})
+		};
+		const existingIndex = presets.findIndex(item => item.id === presetId);
+		if (existingIndex >= 0) {
+			presets[existingIndex] = normalizedPreset;
+		} else {
+			presets.push(normalizedPreset);
+		}
+		await this._saveEnvPresets(config, presets);
+		const activePresetId = config.get<string>('environment.activePresetId', '');
+		if (!activePresetId || activePresetId === presetId) {
+			await this._setActiveEnvPreset(config, presetId);
+		}
+		this._sendCurrentSettings();
+	}
+
+	private async _deleteEnvPreset(presetId: string | undefined): Promise<void> {
+		if (!presetId) return;
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const presets = this._getEnvPresets(config).filter(item => item.id !== presetId);
+		await this._saveEnvPresets(config, presets);
+		const activePresetId = config.get<string>('environment.activePresetId', '');
+		if (activePresetId === presetId) {
+			await config.update('environment.activePresetId', '', vscode.ConfigurationTarget.Global);
+			await config.update('environment.variables', this._createEmptyEnvPresetVariables(), vscode.ConfigurationTarget.Global);
+		}
+		this._sendCurrentSettings();
+	}
+
+	private async _activateEnvPreset(presetId: string | undefined): Promise<void> {
+		if (!presetId) return;
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const envVars = await this._setActiveEnvPreset(config, presetId);
+		await this._writeUserClaudeEnv(envVars);
+		await this._restartClaudeProcessPreservingSession('🔄 Environment switched. Claude will continue this conversation with the new environment on your next message.');
+		this._sendCurrentSettings();
 	}
 
 	private async _getClipboardText(): Promise<void> {

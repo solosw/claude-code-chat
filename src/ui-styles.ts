@@ -28,6 +28,33 @@ const styles = `
         letter-spacing: -0.3px;
     }
 
+    .chat-env-switcher {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 240px;
+        padding: 4px 8px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 6px;
+        background: var(--vscode-editor-background);
+    }
+
+    .chat-env-label {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+    }
+
+    .chat-env-select {
+        min-width: 120px;
+        max-width: 170px;
+        border: none;
+        background: transparent;
+        color: var(--vscode-foreground);
+        font-size: 12px;
+        outline: none;
+    }
+
     @media (max-width: 385px) {
         .header h2 {
             display: none;
@@ -783,6 +810,35 @@ const styles = `
         color: var(--vscode-descriptionForeground);
         font-style: italic;
         line-height: 1.3;
+    }
+
+    .env-presets-toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+    }
+
+    .env-preset-select {
+        flex: 1;
+        min-width: 180px;
+        padding: 6px 8px;
+        border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+        border-radius: 4px;
+        background-color: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        font-size: 12px;
+    }
+
+    .env-preset-name {
+        margin-bottom: 8px;
+    }
+
+    .env-preset-hint {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        margin-bottom: 10px;
     }
 
     .env-variables-list {
