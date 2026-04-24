@@ -3218,21 +3218,20 @@ class ClaudeChatProvider {
 		if (!this._currentSessionId) { return; }
 
 		try {
-			// Create filename from first user message and timestamp
 			const firstUserMessage = this._currentConversation.find(m => m.messageType === 'userInput');
 			const firstMessage = firstUserMessage ? firstUserMessage.data : 'conversation';
 			const startTime = this._conversationStartTime || new Date().toISOString();
 			const sessionId = this._currentSessionId || 'unknown';
 
-			// Clean and truncate first message for filename
 			const cleanMessage = firstMessage
-				.replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
-				.replace(/\s+/g, '-') // Replace spaces with dashes
-				.substring(0, 50) // Limit length
+				.replace(/[^a-zA-Z0-9\s]/g, '')
+				.replace(/\s+/g, '-')
+				.substring(0, 50)
 				.toLowerCase();
 
 			const datePrefix = startTime.substring(0, 16).replace('T', '_').replace(/:/g, '-');
-			const filename = `${datePrefix}_${cleanMessage}.json`;
+			const sessionSuffix = sessionId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 8).toLowerCase() || 'session';
+			const filename = `${datePrefix}_${cleanMessage}_${sessionSuffix}.json`;
 
 			const conversationData: ConversationData = {
 				sessionId: sessionId,
@@ -3252,9 +3251,7 @@ class ClaudeChatProvider {
 			const content = new TextEncoder().encode(JSON.stringify(conversationData, null, 2));
 			await vscode.workspace.fs.writeFile(vscode.Uri.file(filePath), content);
 
-			// Update conversation index
-			this._updateConversationIndex(filename, conversationData);
-
+			await this._updateConversationIndex(filename, conversationData);
 		} catch (error: any) {
 			console.error('Failed to save conversation:', error.message);
 		}
@@ -3262,11 +3259,15 @@ class ClaudeChatProvider {
 
 
 	public async loadConversation(filename: string): Promise<void> {
-		// Load the conversation history
 		await this._loadConversationHistory(filename);
 	}
 
+	private _getConversationIndex(): any[] {
+		return this._context.workspaceState.get('claude.conversationIndex', []);
+	}
+
 	private _sendConversationList(): void {
+		this._conversationIndex = this._getConversationIndex();
 		this._postMessage({
 			type: 'conversationList',
 			data: this._conversationIndex
@@ -3543,13 +3544,11 @@ class ClaudeChatProvider {
 		}
 	}
 
-	private _updateConversationIndex(filename: string, conversationData: ConversationData): void {
-		// Extract first and last user messages
+	private async _updateConversationIndex(filename: string, conversationData: ConversationData): Promise<void> {
 		const userMessages = conversationData.messages.filter((m: any) => m.messageType === 'userInput');
 		const firstUserMessage = userMessages.length > 0 ? userMessages[0].data : 'No user message';
 		const lastUserMessage = userMessages.length > 0 ? userMessages[userMessages.length - 1].data : firstUserMessage;
 
-		// Create or update index entry
 		const indexEntry = {
 			filename: filename,
 			sessionId: conversationData.sessionId,
@@ -3557,26 +3556,25 @@ class ClaudeChatProvider {
 			endTime: conversationData.endTime,
 			messageCount: conversationData.messageCount,
 			totalCost: conversationData.totalCost,
-			firstUserMessage: firstUserMessage.substring(0, 100), // Truncate for storage
+			firstUserMessage: firstUserMessage.substring(0, 100),
 			lastUserMessage: lastUserMessage.substring(0, 100)
 		};
 
-		// Remove any existing entry for this session (in case of updates)
-		this._conversationIndex = this._conversationIndex.filter(entry => entry.filename !== conversationData.filename);
+		const currentIndex = this._getConversationIndex();
+		const nextIndex = currentIndex.filter(entry => {
+			const sameSession = conversationData.sessionId && entry.sessionId && entry.sessionId === conversationData.sessionId;
+			const sameFilename = entry.filename === filename || entry.filename === conversationData.filename;
+			return !sameSession && !sameFilename;
+		});
 
-		// Add new entry at the beginning (most recent first)
-		this._conversationIndex.unshift(indexEntry);
+		nextIndex.unshift(indexEntry);
 
-		// Keep only last 50 conversations to avoid workspace state bloat
-		if (this._conversationIndex.length > 50) {
-			this._conversationIndex = this._conversationIndex.slice(0, 50);
-		}
-
-		// Save to workspace state
-		this._context.workspaceState.update('claude.conversationIndex', this._conversationIndex);
+		this._conversationIndex = nextIndex.slice(0, 50);
+		await this._context.workspaceState.update('claude.conversationIndex', this._conversationIndex);
 	}
 
 	private _getLatestConversation(): any | undefined {
+		this._conversationIndex = this._getConversationIndex();
 		return this._conversationIndex.length > 0 ? this._conversationIndex[0] : undefined;
 	}
 
@@ -3600,6 +3598,7 @@ class ClaudeChatProvider {
 			}
 
 			// Load conversation into current state
+			this._currentSessionId = conversationData.sessionId;
 			this._currentConversation = conversationData.messages || [];
 			this._conversationStartTime = conversationData.startTime;
 			this._totalCost = conversationData.totalCost || 0;
@@ -4203,7 +4202,31 @@ class ClaudeChatProvider {
 		void this._context.workspaceState.update(ClaudeChatProvider.LATEST_CHANGES_STATE_KEY, this._currentLatestChanges);
 	}
 
+	private async _refreshLatestChangeContents(): Promise<void> {
+		const refreshed = await Promise.all(this._currentLatestChanges.map(async item => {
+			if (!fs.existsSync(item.absolutePath)) {
+				return item;
+			}
+
+			try {
+				const fileUri = vscode.Uri.file(item.absolutePath);
+				const fileData = await vscode.workspace.fs.readFile(fileUri);
+				return {
+					...item,
+					newContent: Buffer.from(fileData).toString('utf8'),
+					updatedAt: Date.now(),
+				};
+			} catch {
+				return item;
+			}
+		}));
+
+		this._currentLatestChanges = refreshed;
+		this._persistLatestChanges();
+	}
+
 	private async _sendLatestChanges() {
+		await this._refreshLatestChangeContents();
 		const sessionTitle = this._currentSessionId ? `Session ${this._currentSessionId.slice(0, 8)}` : 'Current Session';
 		const items = this._getLatestChangeItems();
 		this._postMessage({
