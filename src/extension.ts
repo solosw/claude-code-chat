@@ -179,6 +179,41 @@ interface EnvPreset {
 	variables: EnvPresetVariables;
 }
 
+type LocalPermissionValue = true | string[];
+
+interface LocalPermissionsData {
+	alwaysAllow: Record<string, LocalPermissionValue>;
+	removedDefaultTools: string[];
+	defaultsVersion: number;
+}
+
+const DEFAULT_PREAPPROVED_TOOLS = [
+	'Read',
+	'Edit',
+	'Write',
+	'MultiEdit',
+	'Glob',
+	'Grep',
+	'LS',
+	'WebSearch',
+	'WebFetch',
+	'Agent',
+	'AskUserQuestion',
+	'TodoWrite',
+	'EnterPlanMode',
+	'ExitPlanMode',
+	'EnterWorktree',
+	'ExitWorktree',
+	'NotebookEdit',
+	'ScheduleWakeup',
+	'TaskOutput',
+	'TaskStop',
+	'CronCreate',
+	'CronDelete',
+	'CronList',
+	'Skill'
+] as const;
+
 class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -2020,33 +2055,116 @@ class ClaudeChatProvider {
 	}
 
 
+	private _getDefaultPreApprovedTools(): readonly string[] {
+		return DEFAULT_PREAPPROVED_TOOLS;
+	}
+
+	private _createDefaultPermissions(): LocalPermissionsData {
+		const alwaysAllow: Record<string, LocalPermissionValue> = {};
+		for (const toolName of this._getDefaultPreApprovedTools()) {
+			alwaysAllow[toolName] = true;
+		}
+
+		return {
+			alwaysAllow,
+			removedDefaultTools: [],
+			defaultsVersion: 1
+		};
+	}
+
+	private _getPermissionsUri(): vscode.Uri | undefined {
+		const storagePath = this._context.storageUri?.fsPath;
+		if (!storagePath) {
+			return undefined;
+		}
+
+		return vscode.Uri.file(path.join(storagePath, 'permissions', 'permissions.json'));
+	}
+
+	private _normalizePermissions(raw: unknown): LocalPermissionsData {
+		const defaults = this._createDefaultPermissions();
+		const permissions = (raw && typeof raw === 'object') ? raw as Partial<LocalPermissionsData> : {};
+		const alwaysAllow: Record<string, LocalPermissionValue> = {};
+		const rawAlwaysAllow = (permissions.alwaysAllow && typeof permissions.alwaysAllow === 'object')
+			? permissions.alwaysAllow
+			: {};
+
+		for (const [toolName, value] of Object.entries(rawAlwaysAllow)) {
+			if (value === true) {
+				alwaysAllow[toolName] = true;
+				continue;
+			}
+
+			if (Array.isArray(value)) {
+				const commands = value.filter((command): command is string => typeof command === 'string' && command.length > 0);
+				if (commands.length > 0) {
+					alwaysAllow[toolName] = commands;
+				}
+			}
+		}
+
+		const removedDefaultTools = Array.isArray(permissions.removedDefaultTools)
+			? [...new Set(permissions.removedDefaultTools.filter((tool): tool is string => typeof tool === 'string' && tool.length > 0))]
+			: [];
+
+		for (const toolName of this._getDefaultPreApprovedTools()) {
+			if (!(toolName in alwaysAllow) && !removedDefaultTools.includes(toolName)) {
+				alwaysAllow[toolName] = true;
+			}
+		}
+
+		return {
+			alwaysAllow,
+			removedDefaultTools,
+			defaultsVersion: typeof permissions.defaultsVersion === 'number' ? permissions.defaultsVersion : defaults.defaultsVersion
+		};
+	}
+
+	private async _readPermissions(): Promise<LocalPermissionsData> {
+		try {
+			const permissionsUri = this._getPermissionsUri();
+			if (!permissionsUri) {
+				return this._createDefaultPermissions();
+			}
+
+			const content = await vscode.workspace.fs.readFile(permissionsUri);
+			return this._normalizePermissions(JSON.parse(new TextDecoder().decode(content)));
+		} catch {
+			return this._createDefaultPermissions();
+		}
+	}
+
+	private async _writePermissions(permissions: LocalPermissionsData): Promise<void> {
+		const permissionsUri = this._getPermissionsUri();
+		if (!permissionsUri) {
+			return;
+		}
+
+		const permissionsDir = vscode.Uri.file(path.dirname(permissionsUri.fsPath));
+		try {
+			await vscode.workspace.fs.stat(permissionsDir);
+		} catch {
+			await vscode.workspace.fs.createDirectory(permissionsDir);
+		}
+
+		const normalizedPermissions = this._normalizePermissions(permissions);
+		const permissionsContent = new TextEncoder().encode(JSON.stringify(normalizedPermissions, null, 2));
+		await vscode.workspace.fs.writeFile(permissionsUri, permissionsContent);
+	}
+
 	/**
 	 * Check if a tool is pre-approved in local permissions
 	 */
 	private async _isToolPreApproved(toolName: string, input: Record<string, unknown>): Promise<boolean> {
 		try {
-			const storagePath = this._context.storageUri?.fsPath;
-			if (!storagePath) return false;
-
-			const permissionsUri = vscode.Uri.file(path.join(storagePath, 'permissions', 'permissions.json'));
-			let permissions: any = { alwaysAllow: {} };
-
-			try {
-				const content = await vscode.workspace.fs.readFile(permissionsUri);
-				permissions = JSON.parse(new TextDecoder().decode(content));
-			} catch {
-				return false; // No permissions file
-			}
-
-			const toolPermission = permissions.alwaysAllow?.[toolName];
+			const permissions = await this._readPermissions();
+			const toolPermission = permissions.alwaysAllow[toolName];
 
 			if (toolPermission === true) {
-				// Tool is fully approved (all commands/inputs)
 				return true;
 			}
 
 			if (Array.isArray(toolPermission) && toolName === 'Bash' && input.command) {
-				// Check if the command matches any approved pattern
 				const command = (input.command as string).trim();
 				for (const pattern of toolPermission) {
 					if (this._matchesPattern(command, pattern)) {
@@ -2234,8 +2352,28 @@ class ClaudeChatProvider {
 	}
 
 	private async _initializePermissions(): Promise<void> {
-		// No longer needed - permissions are handled via stdio
-		// This method is kept for compatibility but does nothing
+		try {
+			const permissionsUri = this._getPermissionsUri();
+			if (!permissionsUri) {
+				return;
+			}
+
+			const normalizedPermissions = await this._readPermissions();
+
+			try {
+				const currentContent = await vscode.workspace.fs.readFile(permissionsUri);
+				const currentPermissions = this._normalizePermissions(JSON.parse(new TextDecoder().decode(currentContent)));
+				if (JSON.stringify(currentPermissions) === JSON.stringify(normalizedPermissions)) {
+					return;
+				}
+			} catch {
+				// Permissions file is missing or invalid, rewrite it below.
+			}
+
+			await this._writePermissions(normalizedPermissions);
+		} catch (error) {
+			console.error('Error initializing permissions:', error);
+		}
 	}
 
 	/**
@@ -2385,31 +2523,10 @@ class ClaudeChatProvider {
 	 */
 	private async _saveLocalPermission(toolName: string, input: Record<string, unknown>): Promise<void> {
 		try {
-			const storagePath = this._context.storageUri?.fsPath;
-			if (!storagePath) return;
+			const permissions = await this._readPermissions();
 
-			// Ensure permissions directory exists
-			const permissionsDir = path.join(storagePath, 'permissions');
-			try {
-				await vscode.workspace.fs.stat(vscode.Uri.file(permissionsDir));
-			} catch {
-				await vscode.workspace.fs.createDirectory(vscode.Uri.file(permissionsDir));
-			}
-
-			// Load existing permissions
-			const permissionsUri = vscode.Uri.file(path.join(permissionsDir, 'permissions.json'));
-			let permissions: any = { alwaysAllow: {} };
-
-			try {
-				const content = await vscode.workspace.fs.readFile(permissionsUri);
-				permissions = JSON.parse(new TextDecoder().decode(content));
-			} catch {
-				// File doesn't exist yet
-			}
-
-			// Add the permission
 			if (toolName === 'Bash' && input.command) {
-				if (!permissions.alwaysAllow[toolName]) {
+				if (!permissions.alwaysAllow[toolName] || permissions.alwaysAllow[toolName] === true) {
 					permissions.alwaysAllow[toolName] = [];
 				}
 				if (Array.isArray(permissions.alwaysAllow[toolName])) {
@@ -2420,12 +2537,10 @@ class ClaudeChatProvider {
 				}
 			} else {
 				permissions.alwaysAllow[toolName] = true;
+				permissions.removedDefaultTools = permissions.removedDefaultTools.filter(tool => tool !== toolName);
 			}
 
-			// Save permissions
-			const permissionsContent = new TextEncoder().encode(JSON.stringify(permissions, null, 2));
-			await vscode.workspace.fs.writeFile(permissionsUri, permissionsContent);
-
+			await this._writePermissions(permissions);
 		} catch (error) {
 			console.error('Error saving local permission:', error);
 		}
@@ -2527,25 +2642,7 @@ class ClaudeChatProvider {
 
 	private async _sendPermissions(): Promise<void> {
 		try {
-			const storagePath = this._context.storageUri?.fsPath;
-			if (!storagePath) {
-				this._postMessage({
-					type: 'permissionsData',
-					data: { alwaysAllow: {} }
-				});
-				return;
-			}
-
-			const permissionsUri = vscode.Uri.file(path.join(storagePath, 'permissions', 'permissions.json'));
-			let permissions: any = { alwaysAllow: {} };
-
-			try {
-				const content = await vscode.workspace.fs.readFile(permissionsUri);
-				permissions = JSON.parse(new TextDecoder().decode(content));
-			} catch {
-				// File doesn't exist or can't be read, use default permissions
-			}
-
+			const permissions = await this._readPermissions();
 			this._postMessage({
 				type: 'permissionsData',
 				data: permissions
@@ -2554,51 +2651,31 @@ class ClaudeChatProvider {
 			console.error('Error sending permissions:', error);
 			this._postMessage({
 				type: 'permissionsData',
-				data: { alwaysAllow: {} }
+				data: this._createDefaultPermissions()
 			});
 		}
 	}
 
 	private async _removePermission(toolName: string, command: string | null): Promise<void> {
 		try {
-			const storagePath = this._context.storageUri?.fsPath;
-			if (!storagePath) return;
+			const permissions = await this._readPermissions();
 
-			const permissionsUri = vscode.Uri.file(path.join(storagePath, 'permissions', 'permissions.json'));
-			let permissions: any = { alwaysAllow: {} };
-
-			try {
-				const content = await vscode.workspace.fs.readFile(permissionsUri);
-				permissions = JSON.parse(new TextDecoder().decode(content));
-			} catch {
-				// File doesn't exist or can't be read, nothing to remove
-				return;
-			}
-
-			// Remove the permission
 			if (command === null) {
-				// Remove entire tool permission
 				delete permissions.alwaysAllow[toolName];
-			} else {
-				// Remove specific command from tool permissions
-				if (Array.isArray(permissions.alwaysAllow[toolName])) {
-					permissions.alwaysAllow[toolName] = permissions.alwaysAllow[toolName].filter(
-						(cmd: string) => cmd !== command
-					);
-					// If no commands left, remove the tool entirely
-					if (permissions.alwaysAllow[toolName].length === 0) {
-						delete permissions.alwaysAllow[toolName];
-					}
+				if (toolName !== 'Bash' && this._getDefaultPreApprovedTools().includes(toolName) && !permissions.removedDefaultTools.includes(toolName)) {
+					permissions.removedDefaultTools.push(toolName);
+				}
+			} else if (Array.isArray(permissions.alwaysAllow[toolName])) {
+				permissions.alwaysAllow[toolName] = permissions.alwaysAllow[toolName].filter(
+					(cmd: string) => cmd !== command
+				);
+				if (permissions.alwaysAllow[toolName].length === 0) {
+					delete permissions.alwaysAllow[toolName];
 				}
 			}
 
-			// Save updated permissions
-			const permissionsContent = new TextEncoder().encode(JSON.stringify(permissions, null, 2));
-			await vscode.workspace.fs.writeFile(permissionsUri, permissionsContent);
-
-			// Send updated permissions to UI
+			await this._writePermissions(permissions);
 			this._sendPermissions();
-
 		} catch (error) {
 			console.error('Error removing permission:', error);
 		}
@@ -2606,63 +2683,36 @@ class ClaudeChatProvider {
 
 	private async _addPermission(toolName: string, command: string | null): Promise<void> {
 		try {
-			const storagePath = this._context.storageUri?.fsPath;
-			if (!storagePath) return;
+			const permissions = await this._readPermissions();
 
-			const permissionsUri = vscode.Uri.file(path.join(storagePath, 'permissions', 'permissions.json'));
-			let permissions: any = { alwaysAllow: {} };
-
-			try {
-				const content = await vscode.workspace.fs.readFile(permissionsUri);
-				permissions = JSON.parse(new TextDecoder().decode(content));
-			} catch {
-				// File doesn't exist, use default permissions
-			}
-
-			// Add the new permission
 			if (command === null || command === '') {
-				// Allow all commands for this tool
 				permissions.alwaysAllow[toolName] = true;
+				if (toolName !== 'Bash') {
+					permissions.removedDefaultTools = permissions.removedDefaultTools.filter(tool => tool !== toolName);
+				}
 			} else {
-				// Add specific command pattern
 				if (!permissions.alwaysAllow[toolName]) {
 					permissions.alwaysAllow[toolName] = [];
 				}
 
-				// Convert to array if it's currently set to true
 				if (permissions.alwaysAllow[toolName] === true) {
 					permissions.alwaysAllow[toolName] = [];
 				}
 
 				if (Array.isArray(permissions.alwaysAllow[toolName])) {
-					// For Bash commands, convert to pattern using existing logic
 					let commandToAdd = command;
 					if (toolName === 'Bash') {
 						commandToAdd = this.getCommandPattern(command);
 					}
 
-					// Add if not already present
 					if (!permissions.alwaysAllow[toolName].includes(commandToAdd)) {
 						permissions.alwaysAllow[toolName].push(commandToAdd);
 					}
 				}
 			}
 
-			// Ensure permissions directory exists
-			const permissionsDir = vscode.Uri.file(path.dirname(permissionsUri.fsPath));
-			try {
-				await vscode.workspace.fs.stat(permissionsDir);
-			} catch {
-				await vscode.workspace.fs.createDirectory(permissionsDir);
-			}
-
-			// Save updated permissions
-			const permissionsContent = new TextEncoder().encode(JSON.stringify(permissions, null, 2));
-			await vscode.workspace.fs.writeFile(permissionsUri, permissionsContent);
-
-			// Send updated permissions to UI
+			await this._writePermissions(permissions);
 			this._sendPermissions();
-
 		} catch (error) {
 			console.error('Error adding permission:', error);
 		}

@@ -376,6 +376,21 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 									<option value="LS">LS</option>
 									<option value="WebSearch">WebSearch</option>
 									<option value="WebFetch">WebFetch</option>
+									<option value="Agent">Agent</option>
+									<option value="AskUserQuestion">AskUserQuestion</option>
+									<option value="TodoWrite">TodoWrite</option>
+									<option value="EnterPlanMode">EnterPlanMode</option>
+									<option value="ExitPlanMode">ExitPlanMode</option>
+									<option value="EnterWorktree">EnterWorktree</option>
+									<option value="ExitWorktree">ExitWorktree</option>
+									<option value="NotebookEdit">NotebookEdit</option>
+									<option value="ScheduleWakeup">ScheduleWakeup</option>
+									<option value="TaskOutput">TaskOutput</option>
+									<option value="TaskStop">TaskStop</option>
+									<option value="CronCreate">CronCreate</option>
+									<option value="CronDelete">CronDelete</option>
+									<option value="CronList">CronList</option>
+									<option value="Skill">Skill</option>
 								</select>
 								<div style="flex-grow: 1; display: flex;">
 									<input type="text" id="addPermissionCommand" class="permissions-command-input" placeholder="Command pattern (e.g., npm i *)" style="display: none;" />
