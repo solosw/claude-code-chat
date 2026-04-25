@@ -89,6 +89,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let latestChangesHeight = 220;
 		let pendingDroppedPaths = [];
 		let dragOverlayCounter = 0;
+		let isHandlingDrop = false;
 		let activeStreamMessage = null;
 
 		function showDropZoneOverlay() {
@@ -1065,34 +1066,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 		function initializeLatestChangesPanel() {
 			applyLatestChangesPanelState();
-
-			const resizeHandle = document.getElementById('latestChangesResizeHandle');
-			const panel = document.getElementById('latestChangesPanel');
-			if (!resizeHandle || !panel) return;
-
-			resizeHandle.addEventListener('mousedown', (event) => {
-				if (latestChangesCollapsed) return;
-				event.preventDefault();
-
-				const startY = event.clientY;
-				const startHeight = panel.getBoundingClientRect().height;
-				const maxHeight = Math.min(window.innerHeight * 0.45, 420);
-				const minHeight = 120;
-
-				function onMouseMove(moveEvent) {
-					const delta = moveEvent.clientY - startY;
-					latestChangesHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + delta));
-					panel.style.setProperty('--latest-changes-height', latestChangesHeight + 'px');
-				}
-
-				function onMouseUp() {
-					document.removeEventListener('mousemove', onMouseMove);
-					document.removeEventListener('mouseup', onMouseUp);
-				}
-
-				document.addEventListener('mousemove', onMouseMove);
-				document.addEventListener('mouseup', onMouseUp);
-			});
+			latestChangesHeight = 148;
 		}
 
 		function renderLatestChanges() {
@@ -1110,11 +1084,66 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			listEl.innerHTML = latestChangesItems.map(item => renderLatestChangeItem(item)).join('');
 		}
 
+		function getLatestChangeLineStats(item) {
+			const oldLines = (item.oldContent || '').split(/\\r?\\n/);
+			const newLines = (item.newContent || '').split(/\\r?\\n/);
+			let added = 0;
+			let removed = 0;
+			let oldIndex = 0;
+			let newIndex = 0;
+
+			while (oldIndex < oldLines.length || newIndex < newLines.length) {
+				const oldLine = oldLines[oldIndex];
+				const newLine = newLines[newIndex];
+
+				if (oldIndex >= oldLines.length) {
+					added += 1;
+					newIndex += 1;
+					continue;
+				}
+
+				if (newIndex >= newLines.length) {
+					removed += 1;
+					oldIndex += 1;
+					continue;
+				}
+
+				if (oldLine === newLine) {
+					oldIndex += 1;
+					newIndex += 1;
+					continue;
+				}
+
+				if (oldLines[oldIndex + 1] === newLine) {
+					removed += 1;
+					oldIndex += 1;
+					continue;
+				}
+
+				if (oldLine === newLines[newIndex + 1]) {
+					added += 1;
+					newIndex += 1;
+					continue;
+				}
+
+				removed += 1;
+				added += 1;
+				oldIndex += 1;
+				newIndex += 1;
+			}
+
+			return { added, removed };
+		}
+
 		function renderLatestChangeItem(item) {
 			const icon = getLatestChangeStatusIcon(item.status);
 			const revertedClass = item.isReverted ? ' reverted' : '';
 			const changeKey = escapeHtml(item.changeKey || '');
 			const meta = [item.timeLabel, item.directoryLabel].filter(Boolean).join(' · ');
+			const stats = getLatestChangeLineStats(item);
+			const statsHtml = (stats.added || stats.removed)
+				? '<div class="latest-change-stats"><span class="latest-change-added">+' + stats.added + '</span><span class="latest-change-removed">-' + stats.removed + '</span></div>'
+				: '';
 			return (
 				'<div class="latest-change-item' + revertedClass + '" data-change-key="' + changeKey + '">' +
 					'<div class="latest-change-icon ' + escapeHtml(item.status) + '">' + icon + '</div>' +
@@ -1122,10 +1151,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						'<div class="latest-change-name" title="' + escapeHtml(item.fileName) + '">' + escapeHtml(item.fileName) + '</div>' +
 						'<div class="latest-change-meta" title="' + escapeHtml(meta) + '">' + escapeHtml(meta) + '</div>' +
 					'</div>' +
+					statsHtml +
 					'<div class="latest-change-actions">' +
-						'<button class="latest-change-action" data-action="diff" data-change-key="' + changeKey + '">Diff</button>' +
-						'<button class="latest-change-action accept" data-action="accept" data-change-key="' + changeKey + '">Accept</button>' +
-						'<button class="latest-change-action reject" data-action="reject" data-change-key="' + changeKey + '">Reject</button>' +
+						'<button class="latest-change-action" data-action="diff" data-change-key="' + changeKey + '">Open</button>' +
+						'<button class="latest-change-action accept" data-action="accept" data-change-key="' + changeKey + '">✓</button>' +
+						'<button class="latest-change-action reject" data-action="reject" data-change-key="' + changeKey + '">✕</button>' +
 					'</div>' +
 				'</div>'
 			);
@@ -1500,11 +1530,22 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		function handleMessageInputDrop(event) {
 			event.preventDefault();
 			event.stopPropagation();
+			if (isHandlingDrop) {
+				return;
+			}
+			isHandlingDrop = true;
 			hideDropZoneOverlay();
+
 			const paths = extractDroppedPaths(event);
-			if (!paths.length) return;
+			if (!paths.length) {
+				isHandlingDrop = false;
+				return;
+			}
 			pendingDroppedPaths = paths;
 			vscode.postMessage({ type: 'resolveDroppedPaths', paths: paths });
+			setTimeout(() => {
+				isHandlingDrop = false;
+			}, 0);
 		}
 
 		messageInput.addEventListener('dragenter', handleMessageInputDragEnter);
@@ -4087,13 +4128,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					selectedFileIndex = -1;
 					renderFileList();
 					break;
-					
-				case 'imageAttached':
-					if (message.filePath && message.previewUri) {
-						addAttachedImage(message.filePath, message.previewUri);
-					}
-					break;
-					
+
 				case 'conversationList':
 					displayConversationList(message.data);
 					break;
@@ -4917,6 +4952,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 
 		function addAttachedImage(filePath, previewUri) {
+			if (!filePath || attachedImages.some(img => img.filePath === filePath)) {
+				return;
+			}
 			attachedImages.push({ filePath, previewUri });
 			renderImagePreviews();
 			messageInput.focus();
@@ -5513,6 +5551,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				const changeKey = target.getAttribute('data-change-key') || target.closest('.latest-change-item')?.getAttribute('data-change-key');
 				if (!changeKey) return;
 
+				event.preventDefault();
 				event.stopPropagation();
 				if (action === 'accept') {
 					acceptLatestChangeByKey(changeKey);
@@ -5779,9 +5818,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					insertDroppedPaths(items);
 				}
 				pendingDroppedPaths = [];
+				isHandlingDrop = false;
 			}
 		});
 
+		initializeLatestChangesPanel();
 		refreshLatestChanges();
 
 	${getSkillsScript()}

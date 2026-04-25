@@ -181,9 +181,12 @@ interface EnvPreset {
 
 type LocalPermissionValue = true | string[];
 
+const DEFAULT_BASH_PATTERNS = ['rtk *'] as const;
+
 interface LocalPermissionsData {
 	alwaysAllow: Record<string, LocalPermissionValue>;
 	removedDefaultTools: string[];
+	removedDefaultBashPatterns: string[];
 	defaultsVersion: number;
 }
 
@@ -2060,7 +2063,9 @@ class ClaudeChatProvider {
 	}
 
 	private _createDefaultPermissions(): LocalPermissionsData {
-		const alwaysAllow: Record<string, LocalPermissionValue> = {};
+		const alwaysAllow: Record<string, LocalPermissionValue> = {
+			Bash: [...DEFAULT_BASH_PATTERNS],
+		};
 		for (const toolName of this._getDefaultPreApprovedTools()) {
 			alwaysAllow[toolName] = true;
 		}
@@ -2068,6 +2073,7 @@ class ClaudeChatProvider {
 		return {
 			alwaysAllow,
 			removedDefaultTools: [],
+			removedDefaultBashPatterns: [],
 			defaultsVersion: 1
 		};
 	}
@@ -2103,6 +2109,17 @@ class ClaudeChatProvider {
 			}
 		}
 
+		const removedDefaultBashPatterns = Array.isArray(permissions.removedDefaultBashPatterns)
+			? [...new Set(permissions.removedDefaultBashPatterns.filter((pattern): pattern is string => typeof pattern === 'string' && pattern.length > 0))]
+			: [];
+
+		const defaultBashPatterns = DEFAULT_BASH_PATTERNS.filter(pattern => !removedDefaultBashPatterns.includes(pattern));
+		const existingBashPatterns = Array.isArray(alwaysAllow.Bash) ? alwaysAllow.Bash : [];
+		const mergedBashPatterns = [...new Set([...defaultBashPatterns, ...existingBashPatterns])];
+		if (mergedBashPatterns.length > 0) {
+			alwaysAllow.Bash = mergedBashPatterns;
+		}
+
 		const removedDefaultTools = Array.isArray(permissions.removedDefaultTools)
 			? [...new Set(permissions.removedDefaultTools.filter((tool): tool is string => typeof tool === 'string' && tool.length > 0))]
 			: [];
@@ -2116,6 +2133,7 @@ class ClaudeChatProvider {
 		return {
 			alwaysAllow,
 			removedDefaultTools,
+			removedDefaultBashPatterns,
 			defaultsVersion: typeof permissions.defaultsVersion === 'number' ? permissions.defaultsVersion : defaults.defaultsVersion
 		};
 	}
@@ -2674,6 +2692,15 @@ class ClaudeChatProvider {
 				}
 			}
 
+			if (toolName === 'Bash' && command) {
+				const normalizedCommand = this.getCommandPattern(command);
+				const existingPatterns = Array.isArray(permissions.alwaysAllow.Bash) ? permissions.alwaysAllow.Bash : [];
+				permissions.alwaysAllow.Bash = existingPatterns.filter(pattern => pattern !== normalizedCommand);
+				if (DEFAULT_BASH_PATTERNS.includes(normalizedCommand as typeof DEFAULT_BASH_PATTERNS[number]) && !permissions.removedDefaultBashPatterns.includes(normalizedCommand)) {
+					permissions.removedDefaultBashPatterns.push(normalizedCommand);
+				}
+			}
+
 			await this._writePermissions(permissions);
 			this._sendPermissions();
 		} catch (error) {
@@ -2707,6 +2734,9 @@ class ClaudeChatProvider {
 
 					if (!permissions.alwaysAllow[toolName].includes(commandToAdd)) {
 						permissions.alwaysAllow[toolName].push(commandToAdd);
+					}
+					if (toolName === 'Bash') {
+						permissions.removedDefaultBashPatterns = permissions.removedDefaultBashPatterns.filter(pattern => pattern !== commandToAdd);
 					}
 				}
 			}
@@ -3324,7 +3354,7 @@ class ClaudeChatProvider {
 		}
 	}
 
-	private _resolveDroppedPaths(paths: string[] | undefined): void {
+	private async _resolveDroppedPaths(paths: string[] | undefined): Promise<void> {
 		try {
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			if (!workspaceFolder || !Array.isArray(paths) || paths.length === 0) {
@@ -3365,16 +3395,31 @@ class ClaudeChatProvider {
 					continue;
 				}
 
-				const relativePath = vscode.workspace.asRelativePath(vscode.Uri.file(matchedPath), false);
-				if (!relativePath || relativePath === matchedPath || relativePath.startsWith('..')) {
-					continue;
-				}
-
 				let isDirectory = false;
 				try {
 					isDirectory = fs.statSync(matchedPath).isDirectory();
 				} catch {
 					isDirectory = false;
+				}
+
+				if (!isDirectory) {
+					const extension = path.extname(matchedPath).toLowerCase();
+					if (ClaudeChatProvider.IMAGE_EXTENSIONS.includes(extension)) {
+						const previewUri = await this._getImageDataUri(matchedPath);
+						if (previewUri) {
+							this._postMessage({
+								type: 'imageAttached',
+								filePath: matchedPath,
+								previewUri,
+							});
+							continue;
+						}
+					}
+				}
+
+				const relativePath = vscode.workspace.asRelativePath(vscode.Uri.file(matchedPath), false);
+				if (!relativePath || relativePath === matchedPath || relativePath.startsWith('..')) {
+					continue;
 				}
 
 				const normalizedRelativePath = relativePath.replace(/\\/g, '/');

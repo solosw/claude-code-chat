@@ -1017,17 +1017,22 @@ const styles = `
     }
 
     .latest-changes-panel {
-        --latest-changes-height: 220px;
+        --latest-changes-height: 148px;
         height: var(--latest-changes-height);
-        min-height: 56px;
-        max-height: min(45vh, 420px);
+        min-height: 48px;
+        max-height: 220px;
         display: flex;
         flex-direction: column;
-        border-bottom: 1px solid var(--vscode-panel-border);
-        background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-panel-background));
+        margin: 0 10px 8px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-panel-background));
         flex-shrink: 0;
         position: relative;
+        z-index: 1;
+        pointer-events: auto;
         overflow: hidden;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
     }
 
     .latest-changes-panel.collapsed {
@@ -1045,9 +1050,9 @@ const styles = `
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--vscode-panel-border);
-        background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+        padding: 8px 10px;
+        border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 80%, transparent);
+        background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
         flex-shrink: 0;
     }
 
@@ -1087,7 +1092,7 @@ const styles = `
 
     .latest-changes-title {
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 700;
         color: var(--vscode-foreground);
     }
 
@@ -1097,13 +1102,13 @@ const styles = `
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 320px;
+        max-width: 260px;
     }
 
     .latest-changes-header-actions {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         flex-shrink: 0;
     }
 
@@ -1111,10 +1116,11 @@ const styles = `
         background: transparent;
         color: var(--vscode-foreground);
         border: 1px solid var(--vscode-panel-border);
-        border-radius: 4px;
+        border-radius: 8px;
         cursor: pointer;
-        padding: 4px 8px;
-        font-size: 11px;
+        padding: 3px 7px;
+        font-size: 10px;
+        line-height: 1.2;
     }
 
     .latest-changes-btn:hover {
@@ -1131,31 +1137,17 @@ const styles = `
     }
 
     .latest-changes-resize-handle {
-        height: 6px;
-        cursor: row-resize;
-        background: transparent;
-        position: relative;
-        flex-shrink: 0;
-    }
-
-    .latest-changes-resize-handle::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: 2px;
-        transform: translateX(-50%);
-        width: 36px;
-        height: 2px;
-        border-radius: 999px;
-        background: var(--vscode-panel-border);
-        opacity: 0.8;
+        display: none;
     }
 
     .latest-changes-list {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
-        padding: 8px;
+        padding: 6px;
+        position: relative;
+        z-index: 1;
+        pointer-events: auto;
     }
 
     .latest-changes-empty {
@@ -1168,18 +1160,24 @@ const styles = `
 
     .latest-change-item {
         display: grid;
-        grid-template-columns: 18px minmax(0, 1fr) auto;
+        grid-template-columns: 16px minmax(0, 1fr) auto auto;
         gap: 8px;
-        align-items: start;
-        padding: 8px;
-        border-radius: 6px;
+        align-items: center;
+        padding: 8px 9px;
+        border-radius: 10px;
         cursor: pointer;
-        transition: background 0.12s ease;
-        margin-bottom: 2px;
+        transition: background 0.12s ease, border-color 0.12s ease;
+        margin-bottom: 4px;
+        border: 1px solid transparent;
+        background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-panel-background));
+        position: relative;
+        z-index: 1;
+        pointer-events: auto;
     }
 
     .latest-change-item:hover {
         background: var(--vscode-list-hoverBackground);
+        border-color: color-mix(in srgb, var(--vscode-panel-border) 80%, transparent);
     }
 
     .latest-change-item.reverted {
@@ -1188,15 +1186,15 @@ const styles = `
     }
 
     .latest-change-icon {
-        width: 18px;
-        height: 18px;
+        width: 16px;
+        height: 16px;
         display: flex;
         align-items: center;
         justify-content: center;
         font-size: 10px;
         font-weight: 700;
-        border-radius: 3px;
-        margin-top: 1px;
+        border-radius: 4px;
+        margin-top: 0;
     }
 
     .latest-change-icon.added {
@@ -1220,7 +1218,7 @@ const styles = `
 
     .latest-change-name {
         font-size: 12px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--vscode-foreground);
         white-space: nowrap;
         overflow: hidden;
@@ -1235,27 +1233,40 @@ const styles = `
         text-overflow: ellipsis;
     }
 
+    .latest-change-stats {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .latest-change-added {
+        color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+    }
+
+    .latest-change-removed {
+        color: var(--vscode-gitDecoration-deletedResourceForeground, #f14c4c);
+    }
+
     .latest-change-actions {
         display: flex;
         align-items: center;
         gap: 4px;
-        opacity: 0;
-        transition: opacity 0.12s ease;
-    }
-
-    .latest-change-item:hover .latest-change-actions,
-    .latest-change-item:focus-within .latest-change-actions {
         opacity: 1;
+        transition: opacity 0.12s ease;
     }
 
     .latest-change-action {
         background: transparent;
         color: var(--vscode-foreground);
-        border: 1px solid transparent;
-        border-radius: 4px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 6px;
         cursor: pointer;
         padding: 3px 6px;
         font-size: 10px;
+        line-height: 1.2;
     }
 
     .latest-change-action:hover {
@@ -1971,6 +1982,7 @@ const styles = `
         display: flex;
         flex-direction: column;
         position: relative;
+        z-index: 0;
     }
 
     .model-selector-row {
