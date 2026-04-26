@@ -2501,7 +2501,10 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			'ANTHROPIC_BASE_URL',
 			'ANTHROPIC_DEFAULT_OPUS_MODEL',
 			'ANTHROPIC_DEFAULT_SONNET_MODEL',
-			'ANTHROPIC_SMALL_FAST_MODEL'
+			'ANTHROPIC_SMALL_FAST_MODEL',
+			'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+			'CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK',
+			'CLAUDE_CODE_EFFORT_LEVEL'
 		];
 
 		// Recommended alternative models - loaded from recommended-models.json via window.__recommendedModels
@@ -2519,7 +2522,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 		// Check if a model is a OpenCredits model (any model that's not a Claude model)
 		function isOpenCreditsModel(modelId) {
-			const claudeModels = ['opus', 'sonnet', 'default'];
+			const claudeModels = ['opus', 'sonnet', 'haiku', 'default'];
 			return !claudeModels.includes(modelId);
 		}
 
@@ -3075,6 +3078,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const claudeModels = {
 				'opus': 'Claude Opus',
 				'sonnet': 'Claude Sonnet',
+				'haiku': 'Claude Haiku',
 				'default': 'Claude'
 			};
 			if (claudeModels[modelId]) return claudeModels[modelId];
@@ -3124,6 +3128,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					modelDropdown.textContent = 'Opus';
 				} else if (currentModel === 'sonnet') {
 					modelDropdown.textContent = 'Sonnet';
+				} else if (currentModel === 'haiku') {
+					modelDropdown.textContent = 'Haiku';
 				} else if (currentModel === 'default') {
 					modelDropdown.textContent = 'Model';
 				} else {
@@ -3133,9 +3139,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				}
 			}
 
-			if (currentModel === 'opus' || currentModel === 'sonnet') {
+			if (currentModel === 'opus' || currentModel === 'sonnet' || currentModel === 'haiku') {
 				// Claude model selected - show model name, hide badge
-				const modelName = currentModel === 'opus' ? 'Claude Opus' : 'Claude Sonnet';
+				const modelName = currentModel === 'opus'
+					? 'Claude Opus'
+					: currentModel === 'sonnet'
+						? 'Claude Sonnet'
+						: 'Claude Haiku';
 				selectorText.textContent = modelName;
 				selectorBadge.style.display = 'none';
 			} else if (currentModel === 'default' || predefinedModels.includes(currentModel)) {
@@ -3668,7 +3678,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			}
 
 			// Check if this is a OpenCredits model (not a standard Claude model)
-			const claudeModels = ['opus', 'sonnet', 'default'];
+			const claudeModels = ['opus', 'sonnet', 'haiku', 'default'];
 			const isOpenCreditsModel = !claudeModels.includes(model);
 
 			// If selecting a OpenCredits model and envs are disabled, re-enable them
@@ -5216,6 +5226,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			requiredEnvPresetKeys.forEach(key => {
 				envVars[key] = '';
 			});
+			envVars['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1';
+			envVars['CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK'] = '1';
+			envVars['CLAUDE_CODE_EFFORT_LEVEL'] = 'high';
 			return envVars;
 		}
 

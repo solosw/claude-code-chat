@@ -404,7 +404,10 @@ class ClaudeChatProvider {
 		'ANTHROPIC_BASE_URL',
 		'ANTHROPIC_DEFAULT_OPUS_MODEL',
 		'ANTHROPIC_DEFAULT_SONNET_MODEL',
-		'ANTHROPIC_SMALL_FAST_MODEL'
+		'ANTHROPIC_SMALL_FAST_MODEL',
+		'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+		'CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK',
+		'CLAUDE_CODE_EFFORT_LEVEL'
 	] as const;
 
 	private _createEmptyEnvPresetVariables(): EnvPresetVariables {
@@ -413,7 +416,10 @@ class ClaudeChatProvider {
 			ANTHROPIC_BASE_URL: '',
 			ANTHROPIC_DEFAULT_OPUS_MODEL: '',
 			ANTHROPIC_DEFAULT_SONNET_MODEL: '',
-			ANTHROPIC_SMALL_FAST_MODEL: ''
+			ANTHROPIC_SMALL_FAST_MODEL: '',
+			CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+			CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1',
+			CLAUDE_CODE_EFFORT_LEVEL: 'high'
 		};
 	}
 
@@ -1141,9 +1147,9 @@ class ClaudeChatProvider {
 			args.push('--permission-mode', 'plan');
 		}
 
-		// Add model selection for Claude models only (opus, sonnet)
+		// Add model selection for Claude models only (opus, sonnet, haiku)
 		// OpenCredits models are handled via env vars or router mapping
-		const claudeModels = ['opus', 'sonnet'];
+		const claudeModels = ['opus', 'sonnet', 'haiku'];
 		if (this._selectedModel && claudeModels.includes(this._selectedModel)) {
 			args.push('--model', this._selectedModel);
 		}
@@ -2901,7 +2907,15 @@ class ClaudeChatProvider {
 
 	public async _writeUserClaudeEnv(envVars: Record<string, string>): Promise<void> {
 		const settings = await this._readUserClaudeSettings();
-		settings.env = { ...envVars };
+		const existingEnv = settings.env && typeof settings.env === 'object' ? settings.env : {};
+		const normalizedEnv = this._normalizeEnvPresetVariables({
+			...existingEnv,
+			...envVars,
+		});
+		settings.env = {
+			...existingEnv,
+			...normalizedEnv,
+		};
 		await this._writeUserClaudeSettings(settings);
 	}
 
@@ -3364,6 +3378,7 @@ class ClaudeChatProvider {
 
 			const workspaceRoot = workspaceFolder.uri.fsPath;
 			const resolvedMap = new Map<string, { path: string; isDirectory: boolean }>();
+			const seenDroppedImagePaths = new Set<string>();
 			for (const rawValue of paths) {
 				if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
 					continue;
@@ -3405,8 +3420,15 @@ class ClaudeChatProvider {
 				if (!isDirectory) {
 					const extension = path.extname(matchedPath).toLowerCase();
 					if (ClaudeChatProvider.IMAGE_EXTENSIONS.includes(extension)) {
+						const imagePathKey = process.platform === 'win32'
+							? matchedPath.toLowerCase()
+							: matchedPath;
+						if (seenDroppedImagePaths.has(imagePathKey)) {
+							continue;
+						}
 						const previewUri = await this._getImageDataUri(matchedPath);
 						if (previewUri) {
+							seenDroppedImagePaths.add(imagePathKey);
 							this._postMessage({
 								type: 'imageAttached',
 								filePath: matchedPath,
@@ -3897,7 +3919,7 @@ class ClaudeChatProvider {
 
 	private async _setSelectedModel(model: string, tierModels?: { sonnet: string; opus: string; haiku: string }): Promise<void> {
 		// Valid Claude models
-		const validClaudeModels = ['opus', 'sonnet', 'default'];
+		const validClaudeModels = ['opus', 'sonnet', 'haiku', 'default'];
 
 		if (validClaudeModels.includes(model)) {
 			this._selectedModel = model;

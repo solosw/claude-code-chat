@@ -488,6 +488,10 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 						<div class="claude-card-name">Sonnet</div>
 						<div class="claude-card-desc">Balanced performance and speed</div>
 					</div>
+					<div class="claude-card" data-model="haiku" onclick="selectModel('haiku')">
+						<div class="claude-card-name">Haiku</div>
+						<div class="claude-card-desc">Fastest and lightest for simple tasks</div>
+					</div>
 					<div class="claude-card" data-model="default" onclick="selectModel('default')">
 						<div class="claude-card-name">Default</div>
 						<div class="claude-card-desc">Let Claude Code choose the best model</div>
