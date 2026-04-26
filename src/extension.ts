@@ -296,6 +296,13 @@ class ClaudeChatProvider {
 	private _acceptedLatestChangeKeys: Set<string> = new Set();
 	private _pendingLatestChanges: Map<string, PendingLatestChange> = new Map();
 	private _currentLatestChanges: LatestChangeItem[] = [];
+	private _requestChangedPaths: Set<string> = new Set();
+	private _requestBaselineCommitSha: string | undefined;
+	private _requestFileWatcher: vscode.FileSystemWatcher | undefined;
+	private static readonly MAX_TEXT_DETECTION_BYTES = 8192;
+	private static readonly IGNORED_TRACKING_DIR_SEGMENTS = new Set([
+		'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'target', 'bin', 'obj', 'coverage', '.turbo', '.cache', 'out'
+	]);
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -1097,12 +1104,15 @@ class ClaudeChatProvider {
 		});
 
 		// Create backup commit before Claude makes changes
+		let backupCommitSha: string | undefined;
 		try {
-			await this._createBackupCommit(message);
+			backupCommitSha = await this._createBackupCommit(message);
 		}
 		catch (e) {
 			console.error("error", e);
 		}
+
+		this._startRequestFileTracking(backupCommitSha);
 
 		// Show loading indicator
 		this._postMessage({
@@ -1434,7 +1444,7 @@ class ClaudeChatProvider {
 			});
 
 			// Refresh embedded latest changes panel after Claude finishes
-			this._sendLatestChanges().catch(error => {
+			this._finalizeRequestFileTracking().then(() => this._sendLatestChanges()).catch(error => {
 				console.error('Failed to refresh latest changes:', error);
 			});
 
@@ -1934,7 +1944,7 @@ class ClaudeChatProvider {
 		}
 	}
 
-	private async _createBackupCommit(userMessage: string): Promise<void> {
+	private async _createBackupCommit(userMessage: string): Promise<string | undefined> {
 		try {
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			if (!workspaceFolder || !this._backupRepoPath) { return; }
@@ -1989,8 +1999,10 @@ class ClaudeChatProvider {
 				data: commitInfo
 			});
 
+			return sha.trim();
 		} catch (error: any) {
 			console.error('Failed to create backup commit:', error.message);
+			return undefined;
 		}
 	}
 
@@ -3578,6 +3590,7 @@ class ClaudeChatProvider {
 		});
 
 		await this._killClaudeProcess();
+		await this._finalizeRequestFileTracking();
 
 		this._postMessage({
 			type: 'clearLoading'
@@ -4263,6 +4276,177 @@ class ClaudeChatProvider {
 	private _loadPersistedLatestChanges() {
 		const saved = this._context.workspaceState.get<LatestChangeItem[]>(ClaudeChatProvider.LATEST_CHANGES_STATE_KEY, []);
 		this._currentLatestChanges = Array.isArray(saved) ? saved : [];
+	}
+
+	private _isInIgnoredTrackingDirectory(filePath: string, workspaceRoot: string): boolean {
+		const relativePath = path.relative(workspaceRoot, path.normalize(filePath));
+		if (!relativePath || relativePath.startsWith('..')) {
+			return true;
+		}
+
+		const segments = relativePath.split(path.sep).filter(Boolean);
+		return segments.some(segment => ClaudeChatProvider.IGNORED_TRACKING_DIR_SEGMENTS.has(segment));
+	}
+
+	private _isLikelyTextBuffer(buffer: Uint8Array): boolean {
+		if (buffer.length === 0) {
+			return true;
+		}
+
+		let suspiciousBytes = 0;
+		for (const byte of buffer) {
+			if (byte === 0) {
+				return false;
+			}
+			const isAllowedControl = byte === 9 || byte === 10 || byte === 13 || byte === 12;
+			const isPrintableAscii = byte >= 32 && byte <= 126;
+			const isExtendedByte = byte >= 128;
+			if (!isAllowedControl && !isPrintableAscii && !isExtendedByte) {
+				suspiciousBytes += 1;
+			}
+		}
+
+		return suspiciousBytes / buffer.length < 0.1;
+	}
+
+	private async _shouldTrackLatestChangeFile(filePath: string, workspaceRoot: string): Promise<boolean> {
+		const normalizedPath = path.normalize(filePath);
+		if (this._isInIgnoredTrackingDirectory(normalizedPath, workspaceRoot)) {
+			return false;
+		}
+
+		try {
+			if (!fs.existsSync(normalizedPath)) {
+				return true;
+			}
+
+			if (fs.statSync(normalizedPath).isDirectory()) {
+				return false;
+			}
+
+			const fileData = await vscode.workspace.fs.readFile(vscode.Uri.file(normalizedPath));
+			const sample = fileData.slice(0, ClaudeChatProvider.MAX_TEXT_DETECTION_BYTES);
+			return this._isLikelyTextBuffer(sample);
+		} catch {
+			return false;
+		}
+	}
+
+	private _startRequestFileTracking(baselineCommitSha: string | undefined): void {
+		this._requestChangedPaths.clear();
+		this._requestBaselineCommitSha = baselineCommitSha;
+		this._requestFileWatcher?.dispose();
+		this._requestFileWatcher = undefined;
+
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder) {
+			return;
+		}
+
+		const pattern = new vscode.RelativePattern(workspaceFolder, '**/*');
+		const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+		const trackPath = (uri: vscode.Uri) => {
+			const filePath = path.normalize(uri.fsPath);
+			if (this._isInIgnoredTrackingDirectory(filePath, workspaceFolder.uri.fsPath)) {
+				return;
+			}
+			this._requestChangedPaths.add(filePath);
+		};
+
+		watcher.onDidCreate(trackPath);
+		watcher.onDidChange(trackPath);
+		watcher.onDidDelete(trackPath);
+		this._requestFileWatcher = watcher;
+	}
+
+	private async _readTrackedFile(filePath: string): Promise<string> {
+		try {
+			const fileData = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
+			return Buffer.from(fileData).toString('utf8');
+		} catch {
+			return '';
+		}
+	}
+
+	private async _readBackupFileAtCommit(commitSha: string | undefined, filePath: string): Promise<{ beforeExists: boolean; oldContent: string }> {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!commitSha || !workspaceFolder || !this._backupRepoPath) {
+			return { beforeExists: false, oldContent: '' };
+		}
+
+		const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath).replace(/\\/g, '/');
+		if (!relativePath || relativePath.startsWith('..')) {
+			return { beforeExists: false, oldContent: '' };
+		}
+
+		const escapedPath = relativePath.replace(/'/g, `'\\''`);
+		try {
+			const { stdout } = await exec(`git --git-dir="${this._backupRepoPath}" show ${commitSha}:'${escapedPath}'`);
+			return { beforeExists: true, oldContent: stdout };
+		} catch {
+			return { beforeExists: false, oldContent: '' };
+		}
+	}
+
+	private async _finalizeRequestFileTracking(): Promise<void> {
+		const changedPaths = Array.from(this._requestChangedPaths);
+		const baselineCommitSha = this._requestBaselineCommitSha;
+		this._requestChangedPaths.clear();
+		this._requestBaselineCommitSha = undefined;
+		this._requestFileWatcher?.dispose();
+		this._requestFileWatcher = undefined;
+
+		if (!changedPaths.length) {
+			return;
+		}
+
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		for (const filePath of changedPaths) {
+			if (!workspaceFolder || !(await this._shouldTrackLatestChangeFile(filePath, workspaceFolder.uri.fsPath))) {
+				continue;
+			}
+			const beforeState = await this._readBackupFileAtCommit(baselineCommitSha, filePath);
+			const existsNow = fs.existsSync(filePath);
+			const newContent = existsNow ? await this._readTrackedFile(filePath) : '';
+			if (!beforeState.beforeExists && !existsNow) {
+				continue;
+			}
+
+			const changeKey = `${this._currentSessionId || 'session'}::${filePath}`;
+			const existingIndex = this._currentLatestChanges.findIndex(change => change.changeKey === changeKey);
+			const oldContent = existingIndex >= 0 ? this._currentLatestChanges[existingIndex].oldContent : beforeState.oldContent;
+			const beforeExists = existingIndex >= 0 ? this._currentLatestChanges[existingIndex].beforeExists : beforeState.beforeExists;
+			if (existingIndex < 0 && oldContent === newContent && beforeExists === existsNow) {
+				continue;
+			}
+
+			const dirName = path.dirname(filePath);
+			const directoryLabel = dirName && dirName !== '.' ? this._truncateMiddle(dirName, 36) : '';
+			const item: LatestChangeItem = {
+				changeKey,
+				sessionId: this._currentSessionId || 'session',
+				filePath,
+				absolutePath: filePath,
+				status: beforeExists ? 'modified' : 'added',
+				fileName: path.basename(filePath),
+				directoryLabel,
+				timeLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+				isReverted: false,
+				toolName: existingIndex >= 0 ? this._currentLatestChanges[existingIndex].toolName : 'Write',
+				oldContent,
+				newContent,
+				beforeExists,
+				updatedAt: Date.now(),
+			};
+
+			if (existingIndex >= 0) {
+				this._currentLatestChanges[existingIndex] = item;
+			} else {
+				this._currentLatestChanges.push(item);
+			}
+		}
+
+		this._persistLatestChanges();
 	}
 
 	private _persistLatestChanges() {
