@@ -5406,6 +5406,102 @@ const styles = `
         color: #10b981 !important;
     }
 
+    .conversation-resume-row {
+        display: flex;
+        gap: 8px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--vscode-widget-border);
+        align-items: center;
+    }
+
+    .conversation-resume-row .file-search-input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .conversation-list {
+        height: calc(100% - 113px);
+    }
+
+    .attached-session-preview-card {
+        margin: 10px 12px 0;
+        border: 1px solid var(--vscode-widget-border);
+        border-radius: 8px;
+        background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .attached-session-preview-header {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--vscode-foreground);
+        background-color: var(--vscode-list-inactiveSelectionBackground);
+        border: 0;
+        border-bottom: 1px solid var(--vscode-widget-border);
+        cursor: pointer;
+        text-align: left;
+    }
+
+    .attached-session-preview-header:hover {
+        background-color: var(--vscode-list-hoverBackground);
+    }
+
+    .attached-session-preview-chevron {
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground);
+        flex-shrink: 0;
+    }
+
+    .attached-session-preview-card.collapsed .attached-session-preview-header {
+        border-bottom: 0;
+    }
+
+    .attached-session-preview-list {
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .attached-session-preview-message {
+        padding: 8px 10px;
+        border: 1px solid var(--vscode-widget-border);
+        border-radius: 6px;
+        background-color: var(--vscode-editor-background);
+    }
+
+    .attached-session-preview-message.user {
+        background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+    }
+
+    .attached-session-preview-message.assistant {
+        background-color: var(--vscode-list-inactiveSelectionBackground);
+    }
+
+    .attached-session-preview-role {
+        margin-bottom: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--vscode-descriptionForeground);
+    }
+
+    .attached-session-preview-text {
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--vscode-foreground);
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
 </style>`
 
 export default styles

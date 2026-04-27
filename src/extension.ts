@@ -7,6 +7,7 @@ import getHtml from './ui';
 import { startRouter, stopRouter, setModelConfig, setBaseUrl } from './router';
 import { fetchAndResolveModels } from './model-updater';
 import recommendedModels from './recommended-models.json';
+import { findSessionsForWorkspace, SessionMessagePreview } from './checkpointService';
 
 // OpenCredits environment configuration
 let OPENCREDITS_API_URL = 'https://ccc.api.opencredits.ai';
@@ -159,9 +160,34 @@ interface PendingLatestChange {
 	updatedAt: number;
 }
 
+interface RequestStartFileSnapshot {
+	beforeExists: boolean;
+	oldContent: string;
+}
+
+interface BackupFileReadState {
+	kind: 'found' | 'not_found' | 'unknown';
+	beforeExists: boolean;
+	oldContent: string;
+}
+
 interface ClaudeChatProviderOptions {
 	kind: 'sidebar' | 'panel';
 	restoreLatestConversation: boolean;
+}
+
+interface AttachedSessionPreviewState {
+	sessionId: string;
+	messages: SessionMessagePreview[];
+}
+
+interface ClaudeProcessKillContext {
+	sessionId?: string;
+	cwd: string;
+	executable: string;
+	args: string[];
+	wslEnabled: boolean;
+	wslDistro?: string;
 }
 
 interface EnvPresetVariables {
@@ -286,17 +312,21 @@ class ClaudeChatProvider {
 		lastUserMessage: string
 	}> = [];
 	private _currentClaudeProcess: cp.ChildProcess | undefined;
+	private _currentClaudeProcessKillContext: ClaudeProcessKillContext | undefined;
 	private _abortController: AbortController | undefined;
 	private _isWslProcess: boolean = false;
 	private _wslDistro: string = 'Ubuntu';
 	private _selectedModel: string = 'default'; // Default model
 	private _isProcessing: boolean | undefined;
+	private _isStoppingCurrentRequest: boolean = false;
 	private _draftMessage: string = '';
 	private _revertedLatestChangeKeys: Set<string> = new Set();
 	private _acceptedLatestChangeKeys: Set<string> = new Set();
 	private _pendingLatestChanges: Map<string, PendingLatestChange> = new Map();
 	private _currentLatestChanges: LatestChangeItem[] = [];
+	private _attachedSessionPreviewMessages: SessionMessagePreview[] = [];
 	private _requestChangedPaths: Set<string> = new Set();
+	private _requestStartFileSnapshots: Map<string, RequestStartFileSnapshot> = new Map();
 	private _requestBaselineCommitSha: string | undefined;
 	private _requestFileWatcher: vscode.FileSystemWatcher | undefined;
 	private static readonly MAX_TEXT_DETECTION_BYTES = 8192;
@@ -614,6 +644,9 @@ class ClaudeChatProvider {
 			case 'loadConversation':
 				this.loadConversation(message.filename);
 				return;
+			case 'setSessionId':
+				this._attachToSession(message.sessionId);
+				return;
 			case 'stopRequest':
 				this._stopClaudeProcess();
 				return;
@@ -925,6 +958,9 @@ class ClaudeChatProvider {
 			}, 100);
 		}
 
+		this._loadPersistedAttachedSessionPreview();
+		this._sendAttachedSessionPreviewToWebview();
+
 		// Check feature flags and auto-update models (non-blocking)
 		this._checkFeatureFlags().then(enabled => {
 			if (enabled) {
@@ -1103,16 +1139,8 @@ class ClaudeChatProvider {
 			data: { isProcessing: true }
 		});
 
-		// Create backup commit before Claude makes changes
-		let backupCommitSha: string | undefined;
-		try {
-			backupCommitSha = await this._createBackupCommit(message);
-		}
-		catch (e) {
-			console.error("error", e);
-		}
-
-		this._startRequestFileTracking(backupCommitSha);
+		await this._captureRequestStartFileSnapshots();
+		this._startRequestFileTracking();
 
 		// Show loading indicator
 		this._postMessage({
@@ -1190,6 +1218,7 @@ class ClaudeChatProvider {
 
 		// Create new AbortController for this request
 		this._abortController = new AbortController();
+		this._isStoppingCurrentRequest = false;
 
 		// Build environment variables - apply custom env vars from settings
 		let spawnEnv: NodeJS.ProcessEnv = {
@@ -1266,6 +1295,14 @@ class ClaudeChatProvider {
 
 		// Store process reference for potential termination
 		this._currentClaudeProcess = claudeProcess;
+		this._currentClaudeProcessKillContext = {
+			sessionId: this._currentSessionId,
+			cwd,
+			executable: wslEnabled ? 'wsl' : (customExecutablePath || 'claude'),
+			args: [...args],
+			wslEnabled,
+			wslDistro: wslEnabled ? wslDistro : undefined,
+		};
 
 		// Send the message to Claude's stdin as JSON (stream-json input format)
 		// Don't end stdin yet - we need to keep it open for permission responses
@@ -1370,6 +1407,9 @@ class ClaudeChatProvider {
 
 		if (claudeProcess.stdout) {
 			claudeProcess.stdout.on('data', (data) => {
+				if (this._isStoppingCurrentRequest) {
+					return;
+				}
 				rawOutput += data.toString();
 
 				// Process JSON stream line by line
@@ -1497,6 +1537,13 @@ class ClaudeChatProvider {
 	}
 
 	private async _processJsonStreamData(jsonData: any) {
+		if (this._isStoppingCurrentRequest && (
+			jsonData.type === 'assistant' ||
+			jsonData.type === 'user' ||
+			jsonData.type === 'tool_use'
+		)) {
+			return;
+		}
 		switch (jsonData.type) {
 			case 'system':
 				if (jsonData.subtype === 'init') {
@@ -1838,6 +1885,96 @@ class ClaudeChatProvider {
 		}
 	}
 
+
+	private _loadPersistedAttachedSessionPreview(): void {
+		const saved = this._context.workspaceState.get<AttachedSessionPreviewState | undefined>('claude.attachedSessionPreviewState');
+		const savedSessionId = typeof saved?.sessionId === 'string' ? saved.sessionId : '';
+		const savedMessages = Array.isArray(saved?.messages) ? saved.messages : [];
+		this._attachedSessionPreviewMessages = this._currentSessionId && savedSessionId === this._currentSessionId
+			? savedMessages
+			: [];
+	}
+
+	private _persistAttachedSessionPreview(): void {
+		const previewState: AttachedSessionPreviewState = {
+			sessionId: this._currentSessionId || '',
+			messages: this._attachedSessionPreviewMessages
+		};
+		void this._context.workspaceState.update('claude.attachedSessionPreviewState', previewState);
+	}
+
+	private _sendAttachedSessionPreviewToWebview(): void {
+		this._postMessage({
+			type: 'attachedSessionMessages',
+			data: this._attachedSessionPreviewMessages
+		});
+	}
+
+	private async _sendAttachedSessionPreview(sessionId: string): Promise<void> {
+		const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder || !normalizedSessionId) {
+			if (this._currentSessionId === normalizedSessionId) {
+				this._attachedSessionPreviewMessages = [];
+				this._persistAttachedSessionPreview();
+				this._sendAttachedSessionPreviewToWebview();
+			}
+			return;
+		}
+
+		try {
+			const sessions = await findSessionsForWorkspace(workspaceFolder.uri.fsPath);
+			if (this._currentSessionId !== normalizedSessionId) {
+				return;
+			}
+			const session = sessions.find(item => item.sessionId === normalizedSessionId);
+			this._attachedSessionPreviewMessages = session?.rawMessages || [];
+			this._persistAttachedSessionPreview();
+			this._sendAttachedSessionPreviewToWebview();
+		} catch {
+			if (this._currentSessionId !== normalizedSessionId) {
+				return;
+			}
+			this._attachedSessionPreviewMessages = [];
+			this._persistAttachedSessionPreview();
+			this._sendAttachedSessionPreviewToWebview();
+		}
+	}
+
+	private _attachToSession(sessionId: string): void {
+		const trimmedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+		if (!trimmedSessionId) {
+			return;
+		}
+
+		this._currentSessionId = trimmedSessionId;
+		this._currentConversation = [];
+		this._conversationStartTime = undefined;
+		this._totalCost = 0;
+		this._totalTokensInput = 0;
+		this._totalTokensOutput = 0;
+		this._requestCount = 0;
+		this._pendingLatestChanges.clear();
+		this._requestChangedPaths.clear();
+		this._attachedSessionPreviewMessages = [];
+		this._persistAttachedSessionPreview();
+
+		this._postMessage({ type: 'sessionCleared' });
+		this._sendAttachedSessionPreviewToWebview();
+		this._sendAndSaveMessage({
+			type: 'sessionInfo',
+			data: {
+				sessionId: trimmedSessionId,
+				tools: [],
+				mcpServers: []
+			}
+		});
+		this._sendAndSaveMessage({
+			type: 'system',
+			data: `Attached to session ${trimmedSessionId}. The next message will continue that Claude session.`
+		});
+		void this._sendAttachedSessionPreview(trimmedSessionId);
+	}
 
 	private async _newSession(): Promise<void> {
 		this._isProcessing = false;
@@ -3538,50 +3675,107 @@ class ClaudeChatProvider {
 		}
 	}
 
+
+	private _buildClaudeProcessSearchTerms(context: ClaudeProcessKillContext | undefined): string[] {
+		if (!context) {
+			return [];
+		}
+		const terms = new Set<string>();
+		if (context.sessionId?.trim()) {
+			terms.add(context.sessionId.trim());
+		}
+		if (context.cwd?.trim()) {
+			terms.add(context.cwd.trim());
+		}
+		for (const arg of context.args) {
+			if (!arg) continue;
+			if (arg === '--resume') continue;
+			if (arg.startsWith('--')) continue;
+			if (arg.length < 4) continue;
+			terms.add(arg.trim());
+		}
+		return Array.from(terms);
+	}
+
+	private async _killClaudeProcessesBySignature(context: ClaudeProcessKillContext | undefined): Promise<void> {
+		const terms = this._buildClaudeProcessSearchTerms(context)
+			.map(term => term.replace(/["'`\\]/g, '').trim())
+			.filter(term => term.length >= 4);
+		if (!terms.length) {
+			return;
+		}
+
+		if (process.platform === 'win32') {
+			const clauses = terms
+				.map(term => `$_.CommandLine -like '*${term.replace(/'/g, "''")}*'`)
+				.join(' -or ');
+			const command = `$procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and (($_.Name -match 'claude|node|wsl|bash') -and (${clauses})) }; foreach ($p in $procs) { try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch {} }`;
+			try {
+				await exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${command.replace(/"/g, '`"')}"`);
+			} catch {
+				// Ignore best-effort cleanup failures
+			}
+			return;
+		}
+
+		const escapedTerms = terms.map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+		const pattern = `${escapedTerms.map(term => `(?=.*${term})`).join('')}(claude|node|bash|sh|wsl)`;
+		try {
+			await exec(`pkill -f "${pattern}"`);
+		} catch {
+			// Ignore best-effort cleanup failures
+		}
+	}
+
 	private async _killClaudeProcess(): Promise<void> {
 		const processToKill = this._currentClaudeProcess;
 		const pid = processToKill?.pid;
 
-		// 1. Abort via controller (clean API)
 		this._abortController?.abort();
 		this._abortController = undefined;
 
-		// 2. Clear reference immediately
-		this._currentClaudeProcess = undefined;
-
-		if (!pid) {
+		if (!processToKill || !pid) {
+			await this._killClaudeProcessesBySignature(this._currentClaudeProcessKillContext);
+			this._currentClaudeProcess = undefined;
+			this._currentClaudeProcessKillContext = undefined;
 			return;
 		}
 
-
-		// 3. Kill process group (handles children)
-		await this._killProcessGroup(pid, 'SIGTERM');
-
-		// 4. Wait for process to exit, with timeout
-		const exitPromise = new Promise<void>((resolve) => {
-			if (processToKill?.killed) {
+		const waitForExit = () => new Promise<void>((resolve) => {
+			let resolved = false;
+			const done = () => {
+				if (resolved) {
+					return;
+				}
+				resolved = true;
 				resolve();
-				return;
-			}
-			processToKill?.once('exit', () => resolve());
+			};
+			processToKill.once('exit', done);
+			processToKill.once('close', done);
+			setTimeout(done, 2000);
 		});
 
-		const timeoutPromise = new Promise<void>((resolve) => {
-			setTimeout(() => resolve(), 2000);
-		});
+		await this._killProcessGroup(pid, 'SIGTERM');
+		await waitForExit();
 
-		await Promise.race([exitPromise, timeoutPromise]);
-
-		// 5. Force kill if still running
-		if (processToKill && !processToKill.killed) {
+		if (!processToKill.killed) {
 			await this._killProcessGroup(pid, 'SIGKILL');
+			await waitForExit();
 		}
 
+		await this._killClaudeProcessesBySignature(this._currentClaudeProcessKillContext);
+
+		if (this._currentClaudeProcess === processToKill) {
+			this._currentClaudeProcess = undefined;
+		}
+		this._currentClaudeProcessKillContext = undefined;
 	}
 
 	private async _stopClaudeProcess(): Promise<void> {
 
+		this._isStoppingCurrentRequest = true;
 		this._isProcessing = false;
+		this._cancelPendingPermissionRequests();
 
 		// Update UI state
 		this._postMessage({
@@ -3590,6 +3784,7 @@ class ClaudeChatProvider {
 		});
 
 		await this._killClaudeProcess();
+		this._currentClaudeProcess = undefined;
 		await this._finalizeRequestFileTracking();
 
 		this._postMessage({
@@ -4278,6 +4473,30 @@ class ClaudeChatProvider {
 		this._currentLatestChanges = Array.isArray(saved) ? saved : [];
 	}
 
+	private async _captureRequestStartFileSnapshots(): Promise<void> {
+		this._requestStartFileSnapshots.clear();
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder) {
+			return;
+		}
+		const workspaceRoot = workspaceFolder.uri.fsPath;
+		const files = await vscode.workspace.findFiles(
+			'**/*',
+			'{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/.next/**,**/.nuxt/**,**/target/**,**/bin/**,**/obj/**,**/coverage/**,**/.turbo/**,**/.cache/**,**/out/**}'
+		);
+		for (const file of files) {
+			const filePath = path.normalize(file.fsPath);
+			if (!(await this._shouldTrackLatestChangeFile(filePath, workspaceRoot))) {
+				continue;
+			}
+			const oldContent = await this._readTrackedFile(filePath);
+			this._requestStartFileSnapshots.set(filePath, {
+				beforeExists: true,
+				oldContent,
+			});
+		}
+	}
+
 	private _isInIgnoredTrackingDirectory(filePath: string, workspaceRoot: string): boolean {
 		const relativePath = path.relative(workspaceRoot, path.normalize(filePath));
 		if (!relativePath || relativePath.startsWith('..')) {
@@ -4332,9 +4551,8 @@ class ClaudeChatProvider {
 		}
 	}
 
-	private _startRequestFileTracking(baselineCommitSha: string | undefined): void {
+	private _startRequestFileTracking(): void {
 		this._requestChangedPaths.clear();
-		this._requestBaselineCommitSha = baselineCommitSha;
 		this._requestFileWatcher?.dispose();
 		this._requestFileWatcher = undefined;
 
@@ -4345,10 +4563,18 @@ class ClaudeChatProvider {
 
 		const pattern = new vscode.RelativePattern(workspaceFolder, '**/*');
 		const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-		const trackPath = (uri: vscode.Uri) => {
+		const trackPath = async (uri: vscode.Uri) => {
 			const filePath = path.normalize(uri.fsPath);
 			if (this._isInIgnoredTrackingDirectory(filePath, workspaceFolder.uri.fsPath)) {
 				return;
+			}
+			if (!this._requestStartFileSnapshots.has(filePath)) {
+				const existedAtCapture = fs.existsSync(filePath);
+				const oldContent = existedAtCapture ? await this._readTrackedFile(filePath) : '';
+				this._requestStartFileSnapshots.set(filePath, {
+					beforeExists: existedAtCapture,
+					oldContent,
+				});
 			}
 			this._requestChangedPaths.add(filePath);
 		};
@@ -4368,31 +4594,37 @@ class ClaudeChatProvider {
 		}
 	}
 
-	private async _readBackupFileAtCommit(commitSha: string | undefined, filePath: string): Promise<{ beforeExists: boolean; oldContent: string }> {
+	private async _readBackupFileAtCommit(commitSha: string | undefined, filePath: string): Promise<BackupFileReadState> {
 		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 		if (!commitSha || !workspaceFolder || !this._backupRepoPath) {
-			return { beforeExists: false, oldContent: '' };
+			return { kind: 'unknown', beforeExists: false, oldContent: '' };
 		}
 
 		const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath).replace(/\\/g, '/');
 		if (!relativePath || relativePath.startsWith('..')) {
-			return { beforeExists: false, oldContent: '' };
+			return { kind: 'unknown', beforeExists: false, oldContent: '' };
 		}
 
 		const escapedPath = relativePath.replace(/'/g, `'\\''`);
 		try {
 			const { stdout } = await exec(`git --git-dir="${this._backupRepoPath}" show ${commitSha}:'${escapedPath}'`);
-			return { beforeExists: true, oldContent: stdout };
-		} catch {
-			return { beforeExists: false, oldContent: '' };
+			return { kind: 'found', beforeExists: true, oldContent: stdout };
+		} catch (error: any) {
+			const message = String(error?.message || error || '');
+			const stderr = String(error?.stderr || '');
+			const combined = `${message}\n${stderr}`;
+			if (combined.includes('exists on disk, but not in') || combined.includes('pathspec') || combined.includes('does not exist in')) {
+				return { kind: 'not_found', beforeExists: false, oldContent: '' };
+			}
+			return { kind: 'unknown', beforeExists: false, oldContent: '' };
 		}
 	}
 
 	private async _finalizeRequestFileTracking(): Promise<void> {
 		const changedPaths = Array.from(this._requestChangedPaths);
-		const baselineCommitSha = this._requestBaselineCommitSha;
+		const requestStartSnapshots = new Map(this._requestStartFileSnapshots);
 		this._requestChangedPaths.clear();
-		this._requestBaselineCommitSha = undefined;
+		this._requestStartFileSnapshots.clear();
 		this._requestFileWatcher?.dispose();
 		this._requestFileWatcher = undefined;
 
@@ -4405,18 +4637,34 @@ class ClaudeChatProvider {
 			if (!workspaceFolder || !(await this._shouldTrackLatestChangeFile(filePath, workspaceFolder.uri.fsPath))) {
 				continue;
 			}
-			const beforeState = await this._readBackupFileAtCommit(baselineCommitSha, filePath);
+			const snapshotState = requestStartSnapshots.get(filePath);
 			const existsNow = fs.existsSync(filePath);
 			const newContent = existsNow ? await this._readTrackedFile(filePath) : '';
-			if (!beforeState.beforeExists && !existsNow) {
-				continue;
-			}
 
 			const changeKey = `${this._currentSessionId || 'session'}::${filePath}`;
 			const existingIndex = this._currentLatestChanges.findIndex(change => change.changeKey === changeKey);
-			const oldContent = existingIndex >= 0 ? this._currentLatestChanges[existingIndex].oldContent : beforeState.oldContent;
-			const beforeExists = existingIndex >= 0 ? this._currentLatestChanges[existingIndex].beforeExists : beforeState.beforeExists;
-			if (existingIndex < 0 && oldContent === newContent && beforeExists === existsNow) {
+			const existingItem = existingIndex >= 0 ? this._currentLatestChanges[existingIndex] : undefined;
+			const existingBaselineLooksReliable = !!existingItem && (existingItem.beforeExists || existingItem.oldContent !== '');
+
+			let resolvedOldContent = existingBaselineLooksReliable ? existingItem!.oldContent : '';
+			let resolvedBeforeExists = existingBaselineLooksReliable ? existingItem!.beforeExists : false;
+			let resolved = existingBaselineLooksReliable;
+
+			if (!resolved && snapshotState) {
+				resolvedOldContent = snapshotState.oldContent;
+				resolvedBeforeExists = snapshotState.beforeExists;
+				resolved = true;
+			}
+
+			if (!resolved) {
+				continue;
+			}
+
+			if (!resolvedBeforeExists && !existsNow) {
+				continue;
+			}
+
+			if (existingIndex < 0 && resolvedOldContent === newContent && resolvedBeforeExists === existsNow) {
 				continue;
 			}
 
@@ -4427,15 +4675,15 @@ class ClaudeChatProvider {
 				sessionId: this._currentSessionId || 'session',
 				filePath,
 				absolutePath: filePath,
-				status: beforeExists ? 'modified' : 'added',
+				status: resolvedBeforeExists ? 'modified' : 'added',
 				fileName: path.basename(filePath),
 				directoryLabel,
 				timeLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 				isReverted: false,
-				toolName: existingIndex >= 0 ? this._currentLatestChanges[existingIndex].toolName : 'Write',
-				oldContent,
+				toolName: existingItem ? existingItem.toolName : 'Write',
+				oldContent: resolvedOldContent,
 				newContent,
-				beforeExists,
+				beforeExists: resolvedBeforeExists,
 				updatedAt: Date.now(),
 			};
 

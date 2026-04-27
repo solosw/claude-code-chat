@@ -48,6 +48,36 @@ function createServer(): http.Server {
       if (url.pathname === '/v1/messages' && method === 'POST') {
         console.log('[Router] 📥 Received request to /v1/messages');
 
+        const abortController = new AbortController();
+        let downstreamClosed = false;
+        let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+        let cleanupStarted = false;
+
+        const closeDownstream = async (reason?: string) => {
+          if (cleanupStarted) {
+            return;
+          }
+          cleanupStarted = true;
+          downstreamClosed = true;
+          try {
+            abortController.abort(reason);
+          } catch {
+            // Ignore abort errors
+          }
+          try {
+            await streamReader?.cancel(reason);
+          } catch {
+            // Ignore reader cancellation errors
+          }
+        };
+
+        req.on('aborted', () => {
+          void closeDownstream('Request aborted');
+        });
+        res.on('close', () => {
+          void closeDownstream('Response closed');
+        });
+
         const anthropicRequest = await parseBody(req);
         const openaiRequest = formatAnthropicToOpenAI(anthropicRequest);
 
@@ -84,6 +114,7 @@ function createServer(): http.Server {
           method: "POST",
           headers: fetchHeaders,
           body: JSON.stringify(openaiRequest),
+          signal: abortController.signal,
         });
 
         console.log('[Router] 📥 Response status:', openaiResponse.status);
@@ -117,36 +148,66 @@ function createServer(): http.Server {
             openaiRequest.model
           );
 
+          if (downstreamClosed) {
+            await closeDownstream('Downstream already closed before stream start');
+            return;
+          }
+
           res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
           });
 
-          const reader = anthropicStream.getReader();
+          streamReader = anthropicStream.getReader();
 
           const pump = async () => {
             try {
               while (true) {
-                const { done, value } = await reader.read();
+                if (downstreamClosed || res.writableEnded || res.destroyed) {
+                  await closeDownstream('Downstream closed during stream');
+                  return;
+                }
+                const activeReader = streamReader;
+                if (!activeReader) {
+                  return;
+                }
+                const { done, value } = await activeReader.read();
                 if (done) {
-                  res.end();
+                  if (!res.writableEnded && !res.destroyed) {
+                    res.end();
+                  }
                   break;
+                }
+                if (downstreamClosed || res.writableEnded || res.destroyed) {
+                  await closeDownstream('Downstream closed before write');
+                  return;
                 }
                 res.write(value);
               }
-            } catch (error) {
+            } catch (error: any) {
+              if (downstreamClosed || error?.name === 'AbortError') {
+                return;
+              }
               console.error('[Router] Stream error:', error);
-              res.end();
+              if (!res.writableEnded && !res.destroyed) {
+                res.end();
+              }
             }
           };
 
-          pump();
+          void pump();
         } else {
+          if (downstreamClosed) {
+            await closeDownstream('Downstream closed before non-stream response');
+            return;
+          }
           const openaiData = await openaiResponse.json();
           const anthropicResponse = formatOpenAIToAnthropic(openaiData, openaiRequest.model);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(anthropicResponse));
+          if (!res.writableEnded && !res.destroyed) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(anthropicResponse));
+          }
         }
         return;
       }
@@ -154,7 +215,10 @@ function createServer(): http.Server {
       // 404 Not Found
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.name === 'AbortError' || res.writableEnded || res.destroyed) {
+        return;
+      }
       console.error('[Router] Error processing request:', error);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({

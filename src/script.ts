@@ -85,6 +85,10 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let attachedImages = []; // Array of { filePath, previewUri }
 		let latestChangesItems = [];
 		let latestChangesSessionTitle = '';
+		let attachedSessionMessages = [];
+		let attachedSessionPreviewCollapsed = false;
+		let ignoreStreamAfterStop = false;
+		let collapsedConversationGroups = new Set();
 		let latestChangesCollapsed = false;
 		let latestChangesHeight = 220;
 		let pendingDroppedPaths = [];
@@ -3772,7 +3776,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 		function stopRequest() {
 			sendStats('Stop request');
-			
+			ignoreStreamAfterStop = true;
+
 			vscode.postMessage({
 				type: 'stopRequest'
 			});
@@ -3861,6 +3866,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					break;
 					
 				case 'output':
+					if (ignoreStreamAfterStop) {
+						break;
+					}
 					if (message.data.trim()) {
 						let displayData = message.data;
 						
@@ -3907,6 +3915,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				case 'setProcessing':
 					isProcessing = message.data.isProcessing;
 					if (isProcessing) {
+						ignoreStreamAfterStop = false;
 						startRequestTimer(message.data.requestStartTime);
 						showStopButton();
 						disableButtons();
@@ -3963,6 +3972,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					break;
 					
 				case 'thinking':
+					if (ignoreStreamAfterStop) {
+						break;
+					}
 					if (message.data.trim()) {
 						appendToActiveStreamMessage(message.data, 'thinking', '💭 Thinking...');
 					}
@@ -4137,6 +4149,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					filteredFiles = message.data;
 					selectedFileIndex = -1;
 					renderFileList();
+					break;
+
+				case 'attachedSessionMessages':
+					attachedSessionMessages = Array.isArray(message.data) ? message.data : [];
+					renderAttachedSessionMessages(attachedSessionMessages);
 					break;
 
 				case 'conversationList':
@@ -4853,8 +4870,58 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				type: 'loadConversation',
 				filename: filename
 			});
-			
+
 			// Hide conversation history and show chat
+			toggleConversationHistory();
+		}
+
+		function toggleAttachedSessionPreview() {
+			attachedSessionPreviewCollapsed = !attachedSessionPreviewCollapsed;
+			renderAttachedSessionMessages(attachedSessionMessages);
+		}
+
+		function renderAttachedSessionMessages(messages) {
+			const card = document.getElementById('attachedSessionPreviewCard');
+			const list = document.getElementById('attachedSessionPreviewList');
+			const chevron = document.getElementById('attachedSessionPreviewChevron');
+			if (!card || !list || !chevron) return;
+
+			if (!messages || messages.length === 0) {
+				card.style.display = 'none';
+				card.classList.remove('collapsed');
+				list.innerHTML = '';
+				chevron.textContent = '▾';
+				return;
+			}
+
+			card.style.display = 'block';
+			card.classList.toggle('collapsed', attachedSessionPreviewCollapsed);
+			chevron.textContent = attachedSessionPreviewCollapsed ? '▸' : '▾';
+			list.style.display = attachedSessionPreviewCollapsed ? 'none' : 'flex';
+			if (attachedSessionPreviewCollapsed) {
+				return;
+			}
+			list.innerHTML = messages.map(msg => {
+				const role = msg.role === 'user' ? 'User' : 'Claude';
+				const roleClass = msg.role === 'user' ? 'user' : 'assistant';
+				return '<div class="attached-session-preview-message ' + roleClass + '">' +
+					'<div class="attached-session-preview-role">' + escapeHtml(role) + '</div>' +
+					'<div class="attached-session-preview-text">' + escapeHtml(msg.text || '') + '</div>' +
+				'</div>';
+			}).join('');
+		}
+
+		function continueSessionById() {
+			const input = document.getElementById('sessionIdInput');
+			const sessionId = (input && input.value ? input.value : '').trim();
+			if (!sessionId) {
+				return;
+			}
+			vscode.postMessage({
+				type: 'setSessionId',
+				sessionId: sessionId
+			});
+			input.value = '';
 			toggleConversationHistory();
 		}
 

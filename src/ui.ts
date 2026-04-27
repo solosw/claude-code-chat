@@ -1,5 +1,6 @@
 import getScript from './script';
 import styles from './ui-styles'
+
 import recommendedModels from './recommended-models.json'
 import topMcpServers from './top-mcp-servers.json'
 import topSkills from './top-skills.json'
@@ -44,6 +45,10 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 			<h3>Conversation History</h3>
 			<button class="btn" onclick="toggleConversationHistory()">✕ Close</button>
 		</div>
+		<div class="conversation-resume-row">
+			<input type="text" id="sessionIdInput" class="file-search-input" placeholder="Continue by Session ID" />
+			<button class="btn primary" onclick="continueSessionById()">Continue</button>
+		</div>
 		<div id="conversationList" class="conversation-list">
 			<!-- Conversations will be loaded here -->
 		</div>
@@ -51,8 +56,15 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 
 	<div class="chat-container" id="chatContainer">
 		<div class="chat-main">
-			<div class="messages" id="messages"></div>
-			
+		<div id="attachedSessionPreviewCard" class="attached-session-preview-card" style="display: none;">
+					<button class="attached-session-preview-header" type="button" onclick="toggleAttachedSessionPreview()">
+						<span>History</span>
+						<span id="attachedSessionPreviewChevron" class="attached-session-preview-chevron">▾</span>
+					</button>
+					<div id="attachedSessionPreviewList" class="attached-session-preview-list"></div>
+				</div>
+				<div class="messages" id="messages"></div>
+
 			<!-- WSL Alert for Windows users -->
 			<div id="wslAlert" class="wsl-alert" style="display: none;">
 				<div class="wsl-alert-content">

@@ -19,6 +19,12 @@ export interface Snapshot {
   isUpdate: boolean;
 }
 
+export interface SessionMessagePreview {
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: string;
+}
+
 export interface SessionInfo {
   sessionId: string;
   projectPath: string;
@@ -28,6 +34,7 @@ export interface SessionInfo {
   snapshots: Snapshot[];
   firstUserMessage: string;
   slug: string;
+  rawMessages: SessionMessagePreview[];
 }
 
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
@@ -179,6 +186,7 @@ async function parseSessionJsonl(
   backupContentCache: Map<string, string | null>
 ): Promise<SessionInfo | null> {
   const snapshots: Snapshot[] = [];
+  const rawMessages: SessionMessagePreview[] = [];
   let cwd = workspacePath;
   let firstUserMessage = "";
   let slug = "";
@@ -232,6 +240,42 @@ async function parseSessionJsonl(
           }
         }
 
+        if (entry.type === "user" && entry.message?.content) {
+          const content = entry.message.content;
+          let candidate = "";
+          if (typeof content === "string") {
+            candidate = content;
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === "text" && block.text) {
+                candidate += (candidate ? "\n" : "") + block.text;
+              }
+            }
+          }
+          const cleaned = candidate
+            .replace(/<ide_[^>]*>[\s\S]*?<\/ide_[^>]*>/g, "")
+            .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+            .trim();
+          if (cleaned) {
+            rawMessages.push({ role: "user", text: cleaned, timestamp: entry.timestamp });
+          }
+        }
+
+        if (entry.type === "assistant" && entry.message?.content) {
+          let text = "";
+          if (Array.isArray(entry.message.content)) {
+            for (const block of entry.message.content) {
+              if (block.type === "text" && block.text) {
+                text += (text ? "\n" : "") + block.text;
+              }
+            }
+          }
+          const cleaned = text.trim();
+          if (cleaned) {
+            rawMessages.push({ role: "assistant", text: cleaned, timestamp: entry.timestamp });
+          }
+        }
+
         // Extract file-history-snapshot entries
         if (entry.type === "file-history-snapshot" && entry.snapshot) {
           const snapshot = parseSnapshot(entry, cwd);
@@ -266,6 +310,7 @@ async function parseSessionJsonl(
     snapshots: filteredSnapshots,
     firstUserMessage: firstUserMessage.slice(0, 120),
     slug,
+    rawMessages,
   };
 }
 

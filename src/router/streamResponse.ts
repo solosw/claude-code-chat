@@ -1,7 +1,12 @@
 export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: string): ReadableStream {
   const messageId = "msg_" + Date.now();
+  let reader: ReadableStreamDefaultReader<any> | null = null;
+  let cancelled = false;
 
   const enqueueSSE = (controller: ReadableStreamDefaultController, eventType: string, data: any) => {
+    if (cancelled) {
+      return;
+    }
     const sseMessage = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
     controller.enqueue(new TextEncoder().encode(sseMessage));
   };
@@ -32,12 +37,15 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
       let toolCallJsonMap = new Map<string, string>();
       let streamUsage: { input_tokens: number; output_tokens: number } | null = null;
 
-      const reader = openaiStream.getReader();
+      reader = openaiStream.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
 
       try {
         while (true) {
+          if (cancelled || !reader) {
+            break;
+          }
           const { done, value } = await reader.read();
           if (done) {
             // Process any remaining data in buffer
@@ -86,7 +94,7 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
           }
         }
       } finally {
-        reader.releaseLock();
+        reader?.releaseLock();
       }
 
       function processStreamChunk(parsed: any) {
@@ -191,6 +199,10 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
         }
       }
 
+      if (cancelled) {
+        return;
+      }
+
       // Close last content block
       if (hasAnyBlock) {
         enqueueSSE(controller, "content_block_stop", {
@@ -214,6 +226,14 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
       });
 
       controller.close();
+    },
+    async cancel(reason) {
+      cancelled = true;
+      try {
+        await reader?.cancel(reason);
+      } catch {
+        // Ignore cancellation errors
+      }
     },
   });
 }
