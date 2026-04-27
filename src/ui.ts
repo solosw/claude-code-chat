@@ -440,6 +440,14 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 						</p>
 					</div>
 
+					<div style="margin-bottom: 16px;">
+						<label style="display: block; margin-bottom: 4px; font-size: 12px; color: var(--vscode-descriptionForeground);">Default Output Tone</label>
+						<textarea id="default-output-tone" class="file-search-input" style="width: 100%; min-height: 78px; resize: vertical;" placeholder="e.g. Always answer in Chinese. Keep the tone concise, direct, and engineering-focused." onchange="updateSettings()"></textarea>
+						<p style="font-size: 11px; color: var(--vscode-descriptionForeground); margin: 4px 0 0 0;">
+							Automatically appended to every Claude Code request as a style/tone instruction. This changes outgoing prompts only and does not modify the visible user input in chat history.
+						</p>
+					</div>
+
 					<div>
 						<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
 							<label id="envsLabel" style="font-size: 12px; color: var(--vscode-descriptionForeground);">Environment Variables</label>

@@ -88,6 +88,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let attachedSessionMessages = [];
 		let attachedSessionPreviewCollapsed = false;
 		let ignoreStreamAfterStop = false;
+		let lastStreamActivityAt = 0;
+		let hasExplicitRetryingSignal = false;
 		let collapsedConversationGroups = new Set();
 		let latestChangesCollapsed = false;
 		let latestChangesHeight = 220;
@@ -1338,16 +1340,25 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					elapsedStr = \`\${elapsedSeconds}s\`;
 				}
 
+				const silenceMs = lastStreamActivityAt ? (Date.now() - lastStreamActivityAt) : 0;
+				const waitingLabel = hasExplicitRetryingSignal
+					? 'Retrying in background'
+					: silenceMs >= 20000
+						? 'Still working, maybe retrying'
+						: silenceMs >= 10000
+							? 'Still working'
+							: 'Processing';
+
 				let statusText;
 				if (hasOpenCreditsKey) {
 					// OpenCredits users: don't show tokens, just elapsed time
-					statusText = \`Processing\${elapsedStr ? \` • \${elapsedStr}\` : ''}\`;
+					statusText = waitingLabel + (elapsedStr ? ' • ' + elapsedStr : '');
 				} else {
 					// Regular users: show tokens and elapsed time
 					const totalTokens = totalTokensInput + totalTokensOutput;
 					const tokensStr = totalTokens > 0 ?
-						\`\${totalTokens.toLocaleString()} tokens\` : '0 tokens';
-					statusText = \`Processing • \${tokensStr}\${elapsedStr ? \` • \${elapsedStr}\` : ''}\`;
+						totalTokens.toLocaleString() + ' tokens' : '0 tokens';
+					statusText = waitingLabel + ' • ' + tokensStr + (elapsedStr ? ' • ' + elapsedStr : '');
 				}
 				updateStatus(statusText, 'processing');
 			} else {
@@ -3869,6 +3880,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					if (ignoreStreamAfterStop) {
 						break;
 					}
+					lastStreamActivityAt = Date.now();
 					if (message.data.trim()) {
 						let displayData = message.data;
 						
@@ -3915,6 +3927,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				case 'setProcessing':
 					isProcessing = message.data.isProcessing;
 					if (isProcessing) {
+						lastStreamActivityAt = Date.now();
+						hasExplicitRetryingSignal = false;
 						ignoreStreamAfterStop = false;
 						startRequestTimer(message.data.requestStartTime);
 						showStopButton();
@@ -3922,6 +3936,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						showProcessingIndicator();
 					} else {
 						closeActiveStreamMessage();
+						lastStreamActivityAt = 0;
+						hasExplicitRetryingSignal = false;
 						stopRequestTimer();
 						hideStopButton();
 						enableButtons();
@@ -3958,6 +3974,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					break;
 					
 				case 'toolUse':
+					lastStreamActivityAt = Date.now();
 					closeActiveStreamMessage();
 					if (typeof message.data === 'object') {
 						addToolUseMessage(message.data);
@@ -3967,6 +3984,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					break;
 					
 				case 'toolResult':
+					lastStreamActivityAt = Date.now();
 					closeActiveStreamMessage();
 							addToolResultMessage(message.data);
 					break;
@@ -3975,6 +3993,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					if (ignoreStreamAfterStop) {
 						break;
 					}
+					lastStreamActivityAt = Date.now();
 					if (message.data.trim()) {
 						appendToActiveStreamMessage(message.data, 'thinking', '💭 Thinking...');
 					}
@@ -4154,6 +4173,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				case 'attachedSessionMessages':
 					attachedSessionMessages = Array.isArray(message.data) ? message.data : [];
 					renderAttachedSessionMessages(attachedSessionMessages);
+					break;
+
+				case 'retryingStatus':
+					hasExplicitRetryingSignal = true;
+					updateStatus(message.data || 'Claude Code is retrying in the background...', 'processing');
 					break;
 
 				case 'conversationList':
@@ -5223,6 +5247,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const wslClaudePath = document.getElementById('wsl-claude-path').value;
 			const yoloMode = document.getElementById('yolo-mode').checked;
 			const executablePath = document.getElementById('executable-path').value;
+				const defaultOutputTone = document.getElementById('default-output-tone')?.value || '';
 			const useRouter = document.getElementById('use-router')?.checked || false;
 
 			// Collect environment variables from key-value UI
@@ -5262,6 +5287,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					'wsl.claudePath': wslClaudePath || '/usr/local/bin/claude',
 					'permissions.yoloMode': yoloMode,
 					'executable.path': executablePath,
+					'defaultOutputTone': defaultOutputTone,
 					'environment.variables': envVariables,
 					'router.enabled': useRouter
 				}
@@ -5715,6 +5741,10 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 				// Update Customize Claude Command settings
 				document.getElementById('executable-path').value = message.data['executable.path'] || '';
+					const defaultOutputToneInput = document.getElementById('default-output-tone');
+					if (defaultOutputToneInput) {
+						defaultOutputToneInput.value = message.data['defaultOutputTone'] || '';
+					}
 				envPresets = Array.isArray(message.data['environment.presets']) ? message.data['environment.presets'] : [];
 				activeEnvPresetId = message.data['environment.activePresetId'] || (envPresets[0] && envPresets[0].id) || '';
 				renderEnvPresetOptions();

@@ -2,7 +2,7 @@
   "name": "claude-code-chat",
   "displayName": "Chat for Claude Code",
   "description": "Beautiful Claude Code Chat Interface for VS Code",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "publisher": "AndrePimenta",
   "author": "Andre Pimenta",
   "repository": {
@@ -190,6 +190,11 @@
           "type": "string",
           "default": "",
           "description": "Custom path to the Claude Code executable. Leave empty to use the default 'claude' command."
+        },
+        "claudeCodeChat.defaultOutputTone": {
+          "type": "string",
+          "default": "",
+          "description": "Default style and tone instruction automatically appended to each Claude Code request. This affects outgoing prompts only and does not change the displayed user input."
         },
         "claudeCodeChat.environment.variables": {
           "type": "object",

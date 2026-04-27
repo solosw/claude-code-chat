@@ -319,6 +319,7 @@ class ClaudeChatProvider {
 	private _selectedModel: string = 'default'; // Default model
 	private _isProcessing: boolean | undefined;
 	private _isStoppingCurrentRequest: boolean = false;
+	private _hasShownRetryingStatusForCurrentRequest: boolean = false;
 	private _draftMessage: string = '';
 	private _revertedLatestChangeKeys: Set<string> = new Set();
 	private _acceptedLatestChangeKeys: Set<string> = new Set();
@@ -1122,6 +1123,11 @@ class ClaudeChatProvider {
 			actualMessage = thinkingPrompt + thinkingMesssage + actualMessage;
 		}
 
+		const defaultOutputTone = configThink.get<string>('defaultOutputTone', '').trim();
+		if (defaultOutputTone) {
+			actualMessage = `Respond with the following style and tone preferences:\n${defaultOutputTone}\n\n${actualMessage}`;
+		}
+
 		this._isProcessing = true;
 
 		// Clear draft message since we're sending it
@@ -1219,6 +1225,7 @@ class ClaudeChatProvider {
 		// Create new AbortController for this request
 		this._abortController = new AbortController();
 		this._isStoppingCurrentRequest = false;
+		this._hasShownRetryingStatusForCurrentRequest = false;
 
 		// Build environment variables - apply custom env vars from settings
 		let spawnEnv: NodeJS.ProcessEnv = {
@@ -1453,7 +1460,19 @@ class ClaudeChatProvider {
 
 		if (claudeProcess.stderr) {
 			claudeProcess.stderr.on('data', (data) => {
-				errorOutput += data.toString();
+				const stderrChunk = data.toString();
+				errorOutput += stderrChunk;
+				if (!this._hasShownRetryingStatusForCurrentRequest) {
+					const normalized = stderrChunk.toLowerCase();
+					const retryHints = ['retry', 'retrying', 'attempt', 'rate limit', '429', 'overloaded', 'connection', 'timed out', 'reconnect'];
+					if (retryHints.some(hint => normalized.includes(hint))) {
+						this._hasShownRetryingStatusForCurrentRequest = true;
+						this._postMessage({
+							type: 'retryingStatus',
+							data: 'Claude Code is retrying in the background...'
+						});
+					}
+				}
 			});
 		}
 
@@ -3989,6 +4008,7 @@ class ClaudeChatProvider {
 			'permissions.yoloMode': config.get<boolean>('permissions.yoloMode', false),
 			'router.enabled': config.get<boolean>('router.enabled', false),
 			'executable.path': config.get<string>('executable.path', ''),
+			'defaultOutputTone': config.get<string>('defaultOutputTone', ''),
 			'environment.variables': this._normalizeEnvPresetVariables(config.get<Record<string, string>>('environment.variables', {})),
 			'environment.presets': this._getEnvPresets(config),
 			'environment.activePresetId': config.get<string>('environment.activePresetId', ''),
