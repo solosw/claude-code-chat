@@ -2620,6 +2620,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let hasSavedOpenCreditsKey = false; // Whether a key exists in encrypted storage
 		let envPresets = [];
 		let activeEnvPresetId = '';
+		let openaiBridgeProfiles = [];
+		let activeOpenAIBridgeProfileId = '';
 		const requiredEnvPresetKeys = [
 			'ANTHROPIC_AUTH_TOKEN',
 			'ANTHROPIC_BASE_URL',
@@ -5513,6 +5515,78 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			handleEnvPresetChange();
 		}
 
+		function renderOpenAIBridgeProfileOptions() {
+			const select = document.getElementById('openaiBridgeProfileSelect');
+			if (!select) return;
+			select.innerHTML = '';
+			openaiBridgeProfiles.forEach(function(profile) {
+				const opt = document.createElement('option');
+				opt.value = profile.id;
+				opt.textContent = profile.name;
+				select.appendChild(opt);
+			});
+			if (!activeOpenAIBridgeProfileId && openaiBridgeProfiles.length > 0) {
+				activeOpenAIBridgeProfileId = openaiBridgeProfiles[0].id;
+			}
+			select.value = activeOpenAIBridgeProfileId || '';
+			handleOpenAIBridgeProfileChange();
+		}
+
+		function handleOpenAIBridgeProfileChange() {
+			const select = document.getElementById('openaiBridgeProfileSelect');
+			if (!select) return;
+			activeOpenAIBridgeProfileId = select.value || '';
+			const profile = openaiBridgeProfiles.find(function(item) { return item.id === activeOpenAIBridgeProfileId; }) || null;
+			document.getElementById('openaiBridgeProfileName').value = profile ? profile.name || '' : '';
+			document.getElementById('openaiBridgeBaseUrl').value = profile ? profile.bridgeBaseUrl || 'http://127.0.0.1:8787' : 'http://127.0.0.1:8787';
+			document.getElementById('openaiBridgeUpstreamBaseUrl').value = profile ? profile.upstreamBaseUrl || 'https://opencode.ai/zen/go/v1' : 'https://opencode.ai/zen/go/v1';
+			document.getElementById('openaiBridgeApiKey').value = profile ? profile.apiKey || '' : '';
+			document.getElementById('openaiBridgeModel').value = profile ? profile.model || 'deepseek-v4-pro[1m]' : 'deepseek-v4-pro[1m]';
+			document.getElementById('openaiBridgeFastModel').value = profile ? profile.fastModel || 'deepseek-v4-flash' : 'deepseek-v4-flash';
+			document.getElementById('openaiBridgeReasoningContent').value = profile ? profile.reasoningContent || 'auto' : 'auto';
+			document.getElementById('openaiBridgeReasoningCachePath').value = profile ? profile.reasoningCachePath || '' : '';
+			document.getElementById('openaiBridgeRequestBodyLimitBytes').value = profile ? String(profile.requestBodyLimitBytes || 104857600) : '104857600';
+			document.getElementById('openaiBridgeUpstreamTimeoutMs').value = profile ? String(profile.upstreamTimeoutMs || 600000) : '600000';
+		}
+
+		function saveOpenAIBridgeProfile() {
+			vscode.postMessage({
+				type: 'saveOpenAIBridgeProfile',
+				profile: {
+					id: activeOpenAIBridgeProfileId || undefined,
+					name: document.getElementById('openaiBridgeProfileName').value,
+					bridgeBaseUrl: document.getElementById('openaiBridgeBaseUrl').value,
+					upstreamBaseUrl: document.getElementById('openaiBridgeUpstreamBaseUrl').value,
+					apiKey: document.getElementById('openaiBridgeApiKey').value,
+					model: document.getElementById('openaiBridgeModel').value,
+					fastModel: document.getElementById('openaiBridgeFastModel').value,
+					reasoningContent: document.getElementById('openaiBridgeReasoningContent').value,
+					reasoningCachePath: document.getElementById('openaiBridgeReasoningCachePath').value,
+					requestBodyLimitBytes: Number(document.getElementById('openaiBridgeRequestBodyLimitBytes').value || 104857600),
+					upstreamTimeoutMs: Number(document.getElementById('openaiBridgeUpstreamTimeoutMs').value || 600000)
+				}
+			});
+		}
+
+		function deleteOpenAIBridgeProfile() {
+			if (!activeOpenAIBridgeProfileId) return;
+			vscode.postMessage({ type: 'deleteOpenAIBridgeProfile', profileId: activeOpenAIBridgeProfileId });
+		}
+
+		function applyOpenAIBridgeProfile() {
+			if (!activeOpenAIBridgeProfileId) return;
+			vscode.postMessage({ type: 'applyOpenAIBridgeProfile', profileId: activeOpenAIBridgeProfileId });
+		}
+
+		function startOpenAIBridge() {
+			if (!activeOpenAIBridgeProfileId) return;
+			vscode.postMessage({ type: 'startOpenAIBridge', profileId: activeOpenAIBridgeProfileId });
+		}
+
+		function stopOpenAIBridge() {
+			vscode.postMessage({ type: 'stopOpenAIBridge' });
+		}
+
 		function createEnvPreset() {
 			syncCurrentEnvPresetFromUI();
 			const presetId = 'preset-' + Date.now();
@@ -5857,6 +5931,27 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				envPresets = Array.isArray(message.data['environment.presets']) ? message.data['environment.presets'] : [];
 				activeEnvPresetId = message.data['environment.activePresetId'] || (envPresets[0] && envPresets[0].id) || '';
 				renderEnvPresetOptions();
+				openaiBridgeProfiles = Array.isArray(message.data['openaiBridge.profiles']) ? message.data['openaiBridge.profiles'] : [];
+				activeOpenAIBridgeProfileId = (openaiBridgeProfiles[0] && openaiBridgeProfiles[0].id) || '';
+				renderOpenAIBridgeProfileOptions();
+				const bridgeStatus = document.getElementById('openaiBridgeRuntimeStatus');
+				if (bridgeStatus) {
+					const runtime = message.data['openaiBridge.runtimeState'];
+					if (runtime) {
+						const statusLabel = runtime.status === 'starting'
+							? '已启动但未就绪'
+							: runtime.status === 'running'
+								? '已启动但未就绪'
+								: runtime.status === 'ready'
+									? '已就绪'
+									: runtime.status === 'error'
+										? '启动失败'
+										: '已停止';
+						bridgeStatus.textContent = 'Bridge 状态：' + statusLabel + (runtime.port ? ' • 端口 ' + runtime.port : '') + (runtime.message ? ' • ' + runtime.message : '');
+					} else {
+						bridgeStatus.textContent = 'Bridge 状态：已停止';
+					}
+				}
 				renderEnvVariables(message.data['environment.variables'] || {});
 
 				// Detect OpenCredits and envs disabled state

@@ -2,7 +2,7 @@
   "name": "claude-code-chat",
   "displayName": "Chat for Claude Code",
   "description": "Beautiful Claude Code Chat Interface for VS Code",
-  "version": "2.0.14",
+  "version": "2.0.16",
   "publisher": "AndrePimenta",
   "author": "Andre Pimenta",
   "repository": {
@@ -225,6 +225,32 @@
           "type": "string",
           "default": "",
           "description": "The active environment variable preset ID."
+        },
+        "claudeCodeChat.openaiBridge.profiles": {
+          "type": "array",
+          "default": [],
+          "description": "Named OpenAI Bridge profiles used to generate Claude Code environment presets.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "bridgeBaseUrl": { "type": "string" },
+              "upstreamBaseUrl": { "type": "string" },
+              "apiKey": { "type": "string" },
+              "model": { "type": "string" },
+              "fastModel": { "type": "string" },
+              "sonnetModel": { "type": "string" },
+              "opusModel": { "type": "string" },
+              "haikuModel": { "type": "string" },
+              "subagentModel": { "type": "string" },
+              "effortLevel": { "type": "string" },
+              "reasoningContent": { "type": "string" },
+              "reasoningCachePath": { "type": "string" },
+              "requestBodyLimitBytes": { "type": "number" },
+              "upstreamTimeoutMs": { "type": "number" }
+            }
+          }
         },
         "claudeCodeChat.environment.disabled": {
           "type": "boolean",

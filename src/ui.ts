@@ -466,6 +466,32 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 						</p>
 					</div>
 
+					<div style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-panel-background));">
+						<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+							<label style="font-size: 12px; color: var(--vscode-descriptionForeground);">OpenAI Bridge Profiles</label>
+							<select id="openaiBridgeProfileSelect" class="env-preset-select" onchange="handleOpenAIBridgeProfileChange()"></select>
+						</div>
+						<input type="text" id="openaiBridgeProfileName" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Bridge profile name">
+						<input type="text" id="openaiBridgeBaseUrl" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Bridge base URL, e.g. http://127.0.0.1:8787">
+						<input type="text" id="openaiBridgeUpstreamBaseUrl" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Upstream base URL, e.g. https://opencode.ai/zen/go/v1">
+						<input type="password" id="openaiBridgeApiKey" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="OpenAI-compatible API key">
+						<input type="text" id="openaiBridgeModel" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Primary model, e.g. deepseek-v4-pro[1m]">
+						<input type="text" id="openaiBridgeFastModel" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Fast model, e.g. deepseek-v4-flash">
+						<input type="text" id="openaiBridgeReasoningContent" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Reasoning content mode: auto / always / never">
+						<input type="text" id="openaiBridgeReasoningCachePath" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Reasoning cache path (optional)">
+						<input type="number" id="openaiBridgeRequestBodyLimitBytes" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Request body limit bytes, e.g. 104857600">
+						<input type="number" id="openaiBridgeUpstreamTimeoutMs" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Upstream timeout ms, e.g. 600000">
+						<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+							<button class="permissions-show-add-btn" onclick="saveOpenAIBridgeProfile()">Save Bridge</button>
+							<button class="permissions-show-add-btn" onclick="startOpenAIBridge()">Start Bridge</button>
+							<button class="permissions-show-add-btn" onclick="stopOpenAIBridge()">Stop Bridge</button>
+							<button class="permissions-show-add-btn" onclick="applyOpenAIBridgeProfile()">Apply to Env</button>
+							<button class="permissions-show-add-btn" onclick="deleteOpenAIBridgeProfile()">Delete Bridge</button>
+						</div>
+						<div id="openaiBridgeRuntimeStatus" style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 8px;">Bridge status: stopped</div>
+						<div style="font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 8px;">Bridge profile will generate and apply an environment preset for Claude Code.</div>
+					</div>
+
 					<div>
 						<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
 							<label id="envsLabel" style="font-size: 12px; color: var(--vscode-descriptionForeground);">Environment Variables</label>

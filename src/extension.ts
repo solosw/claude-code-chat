@@ -3,6 +3,7 @@ import * as cp from 'child_process';
 import * as util from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import getHtml from './ui';
 import { startRouter, stopRouter, setModelConfig, setBaseUrl } from './router';
 import { fetchAndResolveModels } from './model-updater';
@@ -13,6 +14,7 @@ import { findSessionsForWorkspace, SessionMessagePreview } from './checkpointSer
 let OPENCREDITS_API_URL = 'https://ccc.api.opencredits.ai';
 let OPENCREDITS_WEB_URL = 'https://ccc.opencredits.ai';
 let OPENCREDITS_PUBLISHABLE_KEY = 'oc_pk_c43da4f9a9484ae484ad29bc97cc354f';
+let activeSidebarProvider: ClaudeChatProvider | undefined;
 
 const exec = util.promisify(cp.exec);
 
@@ -35,6 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 		// OPENCREDITS_PUBLISHABLE_KEY = 'oc_pk_c78315e9ff3a425ebca398bb69282429';
 	}
 	const sidebarProvider = new ClaudeChatProvider(context.extensionUri, context, { kind: 'sidebar', restoreLatestConversation: true });
+	activeSidebarProvider = sidebarProvider;
 	const panelProviders = new Set<ClaudeChatProvider>();
 
 	const disposable = vscode.commands.registerCommand('claude-code-chat.openChat', (column?: vscode.ViewColumn) => {
@@ -115,7 +118,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
 	// Stop the local router when the extension is deactivated
-	stopRouter().catch(err => console.error('Failed to stop router:', err));
+	stopRouter().catch((err: any) => console.error('Failed to stop router:', err));
+	// Stop the external OpenAI bridge when the extension is deactivated
+	// Best-effort cleanup only
+	activeSidebarProvider?._stopOpenAIBridge().catch((err: any) => console.error('Failed to stop OpenAI bridge:', err));
 }
 
 interface ConversationData {
@@ -203,6 +209,33 @@ interface EnvPreset {
 	id: string;
 	name: string;
 	variables: EnvPresetVariables;
+}
+
+interface OpenAIBridgeProfile {
+	id: string;
+	name: string;
+	bridgeBaseUrl: string;
+	upstreamBaseUrl: string;
+	apiKey: string;
+	model: string;
+	fastModel: string;
+	sonnetModel?: string;
+	opusModel?: string;
+	haikuModel?: string;
+	subagentModel?: string;
+	effortLevel?: string;
+	reasoningContent?: string;
+	reasoningCachePath?: string;
+	requestBodyLimitBytes?: number;
+	upstreamTimeoutMs?: number;
+}
+
+interface OpenAIBridgeRuntimeState {
+	status: 'stopped' | 'starting' | 'running' | 'ready' | 'error';
+	profileId: string;
+	port: number;
+	pid?: number;
+	message?: string;
 }
 
 type LocalPermissionValue = true | string[];
@@ -313,6 +346,8 @@ class ClaudeChatProvider {
 	}> = [];
 	private _currentClaudeProcess: cp.ChildProcess | undefined;
 	private _currentClaudeProcessKillContext: ClaudeProcessKillContext | undefined;
+	private _openAIBridgeProcess: cp.ChildProcess | undefined;
+	private _openAIBridgeRuntimeState: OpenAIBridgeRuntimeState | undefined;
 	private _abortController: AbortController | undefined;
 	private _isWslProcess: boolean = false;
 	private _wslDistro: string = 'Ubuntu';
@@ -488,6 +523,210 @@ class ClaudeChatProvider {
 
 	private async _saveEnvPresets(config: vscode.WorkspaceConfiguration, presets: EnvPreset[]): Promise<void> {
 		await config.update('environment.presets', presets, vscode.ConfigurationTarget.Global);
+	}
+
+	private _getOpenAIBridgeProfiles(config: vscode.WorkspaceConfiguration): OpenAIBridgeProfile[] {
+		const profiles = config.get<any[]>('openaiBridge.profiles', []);
+		return (profiles || []).map((profile, index) => ({
+			id: typeof profile?.id === 'string' && profile.id ? profile.id : 'bridge-' + index,
+			name: typeof profile?.name === 'string' && profile.name ? profile.name : 'OpenAI Bridge ' + (index + 1),
+			bridgeBaseUrl: typeof profile?.bridgeBaseUrl === 'string' && profile.bridgeBaseUrl ? profile.bridgeBaseUrl : 'http://127.0.0.1:8787',
+			upstreamBaseUrl: typeof profile?.upstreamBaseUrl === 'string' && profile.upstreamBaseUrl ? profile.upstreamBaseUrl : 'https://opencode.ai/zen/go/v1',
+			apiKey: typeof profile?.apiKey === 'string' ? profile.apiKey : '',
+			model: typeof profile?.model === 'string' && profile.model ? profile.model : 'deepseek-v4-pro[1m]',
+			fastModel: typeof profile?.fastModel === 'string' && profile.fastModel ? profile.fastModel : 'deepseek-v4-flash',
+			sonnetModel: typeof profile?.sonnetModel === 'string' ? profile.sonnetModel : '',
+			opusModel: typeof profile?.opusModel === 'string' ? profile.opusModel : '',
+			haikuModel: typeof profile?.haikuModel === 'string' ? profile.haikuModel : '',
+			subagentModel: typeof profile?.subagentModel === 'string' ? profile.subagentModel : '',
+			effortLevel: typeof profile?.effortLevel === 'string' && profile.effortLevel ? profile.effortLevel : 'max',
+			reasoningContent: typeof profile?.reasoningContent === 'string' && profile.reasoningContent ? profile.reasoningContent : 'auto',
+			reasoningCachePath: typeof profile?.reasoningCachePath === 'string' ? profile.reasoningCachePath : '',
+			requestBodyLimitBytes: typeof profile?.requestBodyLimitBytes === 'number' ? profile.requestBodyLimitBytes : 104857600,
+			upstreamTimeoutMs: typeof profile?.upstreamTimeoutMs === 'number' ? profile.upstreamTimeoutMs : 600000
+		}));
+	}
+
+	private async _saveOpenAIBridgeProfiles(config: vscode.WorkspaceConfiguration, profiles: OpenAIBridgeProfile[]): Promise<void> {
+		await config.update('openaiBridge.profiles', profiles, vscode.ConfigurationTarget.Global);
+	}
+
+	private _buildEnvPresetFromBridgeProfile(profile: OpenAIBridgeProfile): EnvPreset {
+		const model = profile.model || 'deepseek-v4-pro[1m]';
+		const fastModel = profile.fastModel || 'deepseek-v4-flash';
+		return {
+			id: 'bridge-preset-' + profile.id,
+			name: profile.name + ' Env',
+			variables: this._normalizeEnvPresetVariables({
+				ANTHROPIC_BASE_URL: profile.bridgeBaseUrl,
+				ANTHROPIC_AUTH_TOKEN: profile.apiKey,
+				API_TIMEOUT_MS: '3000000',
+				CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+				CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
+				ANTHROPIC_MODEL: model,
+				ANTHROPIC_SMALL_FAST_MODEL: fastModel,
+				ANTHROPIC_DEFAULT_SONNET_MODEL: profile.sonnetModel || model,
+				ANTHROPIC_DEFAULT_OPUS_MODEL: profile.opusModel || model,
+				ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.haikuModel || fastModel,
+				CLAUDE_CODE_SUBAGENT_MODEL: profile.subagentModel || model,
+				CLAUDE_CODE_EFFORT_LEVEL: profile.effortLevel || 'max'
+			})
+		};
+	}
+
+	private async _saveOpenAIBridgeProfile(profile: Partial<OpenAIBridgeProfile> | undefined): Promise<void> {
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const profiles = this._getOpenAIBridgeProfiles(config);
+		const profileId = typeof profile?.id === 'string' && profile.id ? profile.id : 'bridge-' + Date.now();
+		const normalized: OpenAIBridgeProfile = {
+			id: profileId,
+			name: typeof profile?.name === 'string' && profile.name.trim() ? profile.name.trim() : 'OpenAI Bridge',
+			bridgeBaseUrl: typeof profile?.bridgeBaseUrl === 'string' && profile.bridgeBaseUrl.trim() ? profile.bridgeBaseUrl.trim() : 'http://127.0.0.1:8787',
+			upstreamBaseUrl: typeof profile?.upstreamBaseUrl === 'string' && profile.upstreamBaseUrl.trim() ? profile.upstreamBaseUrl.trim() : 'https://opencode.ai/zen/go/v1',
+			apiKey: typeof profile?.apiKey === 'string' ? profile.apiKey.trim() : '',
+			model: typeof profile?.model === 'string' && profile.model.trim() ? profile.model.trim() : 'deepseek-v4-pro[1m]',
+			fastModel: typeof profile?.fastModel === 'string' && profile.fastModel.trim() ? profile.fastModel.trim() : 'deepseek-v4-flash',
+			sonnetModel: typeof profile?.sonnetModel === 'string' ? profile.sonnetModel.trim() : '',
+			opusModel: typeof profile?.opusModel === 'string' ? profile.opusModel.trim() : '',
+			haikuModel: typeof profile?.haikuModel === 'string' ? profile.haikuModel.trim() : '',
+			subagentModel: typeof profile?.subagentModel === 'string' ? profile.subagentModel.trim() : '',
+			effortLevel: typeof profile?.effortLevel === 'string' && profile.effortLevel.trim() ? profile.effortLevel.trim() : 'max',
+			reasoningContent: typeof profile?.reasoningContent === 'string' && profile.reasoningContent.trim() ? profile.reasoningContent.trim() : 'auto',
+			reasoningCachePath: typeof profile?.reasoningCachePath === 'string' ? profile.reasoningCachePath.trim() : '',
+			requestBodyLimitBytes: typeof profile?.requestBodyLimitBytes === 'number' ? profile.requestBodyLimitBytes : 104857600,
+			upstreamTimeoutMs: typeof profile?.upstreamTimeoutMs === 'number' ? profile.upstreamTimeoutMs : 600000
+		};
+		const existingIndex = profiles.findIndex(item => item.id === profileId);
+		if (existingIndex >= 0) {
+			profiles[existingIndex] = normalized;
+		} else {
+			profiles.push(normalized);
+		}
+		await this._saveOpenAIBridgeProfiles(config, profiles);
+		this._sendCurrentSettings();
+	}
+
+	private async _deleteOpenAIBridgeProfile(profileId: string | undefined): Promise<void> {
+		if (!profileId) return;
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const profiles = this._getOpenAIBridgeProfiles(config).filter(item => item.id !== profileId);
+		await this._saveOpenAIBridgeProfiles(config, profiles);
+		this._sendCurrentSettings();
+	}
+
+	private async _applyOpenAIBridgeProfile(profileId: string | undefined): Promise<void> {
+		if (!profileId) return;
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const profile = this._getOpenAIBridgeProfiles(config).find(item => item.id === profileId);
+		if (!profile) return;
+		const preset = this._buildEnvPresetFromBridgeProfile(profile);
+		await this._saveEnvPreset(preset);
+		await this._activateEnvPreset(preset.id);
+	}
+
+	private _getBundledOpenAIBridgeDir(): string {
+		return path.join(this._context.extensionPath, 'deepseek-v4-opencode-claude-code-bridge-main');
+	}
+
+	private async _writeOpenAIBridgeTempConfig(profile: OpenAIBridgeProfile): Promise<string> {
+		const dir = this._getBundledOpenAIBridgeDir();
+		const configPath = path.join(dir, `.runtime-${profile.id}.json`);
+		const configPayload = {
+			listen: {
+				host: '127.0.0.1',
+				port: Number((profile.bridgeBaseUrl.match(/:(\d+)(?:\/)?$/) || [])[1] || 8787)
+			},
+			upstream: {
+				baseUrl: profile.upstreamBaseUrl || 'https://opencode.ai/zen/go/v1'
+			},
+			models: [profile.model || 'deepseek-v4-pro[1m]', profile.fastModel || 'deepseek-v4-flash'],
+			reasoningContent: profile.reasoningContent || 'auto',
+			reasoningCachePath: profile.reasoningCachePath || path.join(os.homedir(), '.claude', 'deepseek-v4-opencode-claude-code-bridge-reasoning-cache.json'),
+			requestBodyLimitBytes: profile.requestBodyLimitBytes || 104857600,
+			upstreamTimeoutMs: profile.upstreamTimeoutMs || 600000
+		};
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(configPath), Buffer.from(JSON.stringify(configPayload, null, 2), 'utf8'));
+		return configPath;
+	}
+
+	private async _startOpenAIBridge(profileId: string | undefined): Promise<void> {
+		if (!profileId) return;
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const profile = this._getOpenAIBridgeProfiles(config).find(item => item.id === profileId);
+		if (!profile) return;
+		await this._stopOpenAIBridge();
+		const port = Number((profile.bridgeBaseUrl.match(/:(\d+)(?:\/)?$/) || [])[1] || 8787);
+		this._openAIBridgeRuntimeState = { status: 'starting', profileId, port, message: 'Bridge starting...' };
+		this._sendCurrentSettings();
+		const dir = this._getBundledOpenAIBridgeDir();
+		const configPath = await this._writeOpenAIBridgeTempConfig(profile);
+		const proc = cp.spawn(process.execPath, ['server.js', '--config', configPath], {
+			cwd: dir,
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		this._openAIBridgeProcess = proc;
+		this._openAIBridgeRuntimeState = { status: 'running', profileId, port, pid: proc.pid, message: 'Bridge started, waiting for readiness...' };
+		proc.once('exit', (code, signal) => {
+			this._openAIBridgeProcess = undefined;
+			this._openAIBridgeRuntimeState = { status: 'stopped', profileId, port, message: `Bridge exited (${code ?? signal ?? 'unknown'})` };
+			this._sendCurrentSettings();
+		});
+		proc.stderr?.on('data', (chunk) => {
+			const currentStatus = this._openAIBridgeRuntimeState?.status === 'ready' ? 'ready' : 'running';
+			this._openAIBridgeRuntimeState = { ...(this._openAIBridgeRuntimeState || { status: 'error', profileId, port }), status: currentStatus, profileId, port, pid: proc.pid, message: String(chunk).trim() || (currentStatus === 'ready' ? 'Bridge ready' : 'Bridge started, waiting for readiness...') };
+			this._sendCurrentSettings();
+		});
+		void this._probeOpenAIBridgeReady(profileId, port);
+		this._sendCurrentSettings();
+	}
+
+	public async _stopOpenAIBridge(): Promise<void> {
+		const proc = this._openAIBridgeProcess;
+		if (!proc) {
+			return;
+		}
+		try {
+			proc.kill();
+		} catch {
+			// ignore
+		}
+		this._openAIBridgeProcess = undefined;
+		if (this._openAIBridgeRuntimeState) {
+			this._openAIBridgeRuntimeState = { ...this._openAIBridgeRuntimeState, status: 'stopped', message: 'Bridge stopped' };
+		}
+		this._sendCurrentSettings();
+	}
+
+	private async _probeOpenAIBridgeReady(profileId: string, port: number): Promise<void> {
+		const probeUrl = `http://127.0.0.1:${port}/health`;
+		for (let attempt = 0; attempt < 10; attempt += 1) {
+			if (!this._openAIBridgeRuntimeState || this._openAIBridgeRuntimeState.profileId !== profileId) {
+				return;
+			}
+			try {
+				const response = await fetch(probeUrl);
+				if (response.ok) {
+					this._openAIBridgeRuntimeState = {
+						...this._openAIBridgeRuntimeState,
+						status: 'ready',
+						message: 'Bridge ready'
+					};
+					this._sendCurrentSettings();
+					return;
+				}
+			} catch {
+				// not ready yet
+			}
+			await new Promise(resolve => setTimeout(resolve, 300));
+		}
+		if (this._openAIBridgeRuntimeState && this._openAIBridgeRuntimeState.profileId === profileId && this._openAIBridgeRuntimeState.status !== 'ready') {
+			this._openAIBridgeRuntimeState = {
+				...this._openAIBridgeRuntimeState,
+				status: 'error',
+				message: 'Bridge started but health check did not pass'
+			};
+			this._sendCurrentSettings();
+		}
 	}
 
 	private async _setActiveEnvPreset(config: vscode.WorkspaceConfiguration, presetId: string): Promise<EnvPresetVariables> {
@@ -668,6 +907,21 @@ class ClaudeChatProvider {
 				return;
 			case 'setActiveEnvPreset':
 				await this._activateEnvPreset(message.presetId);
+				return;
+			case 'saveOpenAIBridgeProfile':
+				await this._saveOpenAIBridgeProfile(message.profile);
+				return;
+			case 'deleteOpenAIBridgeProfile':
+				await this._deleteOpenAIBridgeProfile(message.profileId);
+				return;
+			case 'applyOpenAIBridgeProfile':
+				await this._applyOpenAIBridgeProfile(message.profileId);
+				return;
+			case 'startOpenAIBridge':
+				await this._startOpenAIBridge(message.profileId);
+				return;
+			case 'stopOpenAIBridge':
+				await this._stopOpenAIBridge();
 				return;
 			case 'setEnvsDisabled':
 				await this._setEnvsDisabled(!!message.disabled);
@@ -4012,6 +4266,8 @@ class ClaudeChatProvider {
 			'environment.variables': this._normalizeEnvPresetVariables(config.get<Record<string, string>>('environment.variables', {})),
 			'environment.presets': this._getEnvPresets(config),
 			'environment.activePresetId': config.get<string>('environment.activePresetId', ''),
+			'openaiBridge.profiles': this._getOpenAIBridgeProfiles(config),
+			'openaiBridge.runtimeState': this._openAIBridgeRuntimeState || null,
 			'environment.disabled': config.get<boolean>('environment.disabled', false),
 			'isOpenCredits': this._isOpenCredits()
 		};
@@ -4129,6 +4385,14 @@ class ClaudeChatProvider {
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
 		const envVars = await this._setActiveEnvPreset(config, presetId);
 		await this._writeUserClaudeEnv(envVars);
+
+		if (presetId.startsWith('bridge-preset-')) {
+			const profileId = presetId.replace('bridge-preset-', '');
+			await this._startOpenAIBridge(profileId);
+		} else {
+			await this._stopOpenAIBridge();
+		}
+
 		await this._restartClaudeProcessPreservingSession('🔄 Environment switched. Claude will continue this conversation with the new environment on your next message.');
 		this._sendCurrentSettings();
 	}
