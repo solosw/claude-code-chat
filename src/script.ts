@@ -5532,6 +5532,20 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			handleOpenAIBridgeProfileChange();
 		}
 
+		function updateBridgeStatusBadge(runtime) {
+			const badge = document.getElementById('bridgeStatusBadge');
+			if (!badge) return;
+			if (!runtime || runtime.status === 'stopped') {
+				badge.style.display = 'none';
+				return;
+			}
+			badge.style.display = 'flex';
+			badge.className = 'bridge-status-badge ' + (runtime.status || 'stopped');
+			const portLabel = runtime.port ? ':' + runtime.port : '';
+			badge.innerHTML = '<span class="bridge-status-dot"></span>Bridge' + portLabel;
+			badge.setAttribute('title', 'Bridge ' + runtime.status + (runtime.port ? ' • 端口 ' + runtime.port : '') + (runtime.message ? ' • ' + runtime.message : ''));
+		}
+
 		function handleOpenAIBridgeProfileChange() {
 			const select = document.getElementById('openaiBridgeProfileSelect');
 			if (!select) return;
@@ -5952,6 +5966,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						bridgeStatus.textContent = 'Bridge 状态：已停止';
 					}
 				}
+				// Update chat header bridge badge
+				updateBridgeStatusBadge(message.data['openaiBridge.runtimeState']);
 				renderEnvVariables(message.data['environment.variables'] || {});
 
 				// Detect OpenCredits and envs disabled state

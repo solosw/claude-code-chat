@@ -4266,6 +4266,68 @@ const styles = `
         border-color: var(--vscode-terminal-ansiGreen);
     }
 
+    .bridge-status-badge {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background-color: var(--vscode-badge-background);
+        border: 1px solid var(--vscode-panel-border);
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+        cursor: default;
+    }
+
+    .bridge-status-badge.ready {
+        color: var(--vscode-terminal-ansiGreen);
+        background-color: rgba(0, 210, 106, 0.1);
+        border-color: var(--vscode-terminal-ansiGreen);
+    }
+
+    .bridge-status-badge.starting,
+    .bridge-status-badge.running {
+        color: var(--vscode-terminal-ansiYellow);
+        background-color: rgba(255, 180, 0, 0.1);
+        border-color: var(--vscode-terminal-ansiYellow);
+    }
+
+    .bridge-status-badge.error,
+    .bridge-status-badge.stopped {
+        color: var(--vscode-terminal-ansiRed);
+        background-color: rgba(255, 80, 80, 0.1);
+        border-color: var(--vscode-terminal-ansiRed);
+    }
+
+    .bridge-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .bridge-status-badge.ready .bridge-status-dot {
+        background-color: var(--vscode-terminal-ansiGreen);
+        box-shadow: 0 0 4px var(--vscode-terminal-ansiGreen);
+    }
+
+    .bridge-status-badge.starting .bridge-status-dot,
+    .bridge-status-badge.running .bridge-status-dot {
+        background-color: var(--vscode-terminal-ansiYellow);
+        animation: bridgePulse 1.5s ease-in-out infinite;
+    }
+
+    .bridge-status-badge.error .bridge-status-dot,
+    .bridge-status-badge.stopped .bridge-status-dot {
+        background-color: var(--vscode-terminal-ansiRed);
+    }
+
+    @keyframes bridgePulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+
     /* Markdown content styles */
     .message h1, .message h2, .message h3, .message h4 {
         margin: 0.8em 0 0.4em 0;

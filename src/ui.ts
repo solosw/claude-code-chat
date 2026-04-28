@@ -33,7 +33,8 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 				<label for="chatEnvPresetSelect" class="chat-env-label">Env</label>
 				<select id="chatEnvPresetSelect" class="chat-env-select" onchange="handleChatEnvPresetChange()"></select>
 			</div>
-			<div id="sessionStatus" class="session-status" style="display: none;">No session</div>
+			<div id="bridgeStatusBadge" class="bridge-status-badge" style="display: none;" title="OpenAI Bridge"></div>
+				<div id="sessionStatus" class="session-status" style="display: none;">No session</div>
 			<button class="btn outlined" id="settingsBtn" onclick="toggleSettings()" title="Settings">⚙️</button>
 			<button class="btn outlined" id="historyBtn" onclick="toggleConversationHistory()">📚 History</button>
 			<button class="btn primary" id="newSessionBtn" onclick="newSession()">New Chat</button>
