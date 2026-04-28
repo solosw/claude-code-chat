@@ -84,20 +84,38 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 				<div class="latest-changes-header">
 					<div class="latest-changes-title-wrap">
 						<div class="latest-changes-title-row">
-							<button class="latest-changes-collapse-btn" id="latestChangesCollapseBtn" onclick="toggleLatestChangesPanel()" title="Collapse latest changes">▾</button>
-							<div class="latest-changes-title">Latest Changes</div>
+							<button class="latest-changes-collapse-btn" id="latestChangesCollapseBtn" onclick="toggleLatestChangesPanel()" title="Collapse panel">▾</button>
+							<div class="latest-changes-title" id="bottomPanelTitle">任务</div>
 						</div>
 						<div class="latest-changes-session" id="latestChangesSession"></div>
 					</div>
-					<div class="latest-changes-header-actions">
-						<button class="latest-changes-btn" onclick="acceptAllLatestChanges()" title="Accept all latest changes">Accept All</button>
-						<button class="latest-changes-btn danger" onclick="rejectAllLatestChanges()" title="Reject all latest changes">Reject All</button>
-						<button class="latest-changes-btn" onclick="refreshLatestChanges()" title="Refresh latest changes">↻</button>
+					<div class="latest-changes-header-actions" id="bottomPanelActions"></div>
+				</div>
+				<div class="latest-changes-body" id="bottomPanelBody">
+					<div class="bottom-panel-empty-card" id="bottomPanelEmptyCard">暂无任务运行</div>
+					<div class="latest-changes-resize-handle" id="latestChangesResizeHandle" title="Drag to resize bottom panel"></div>
+					<div class="bottom-panel-content">
+						<div class="bottom-panel-pane active" id="bottomPaneTasks">
+							<div class="bottom-panel-list" id="todosPanelList">
+								<div class="latest-changes-empty">暂无任务运行</div>
+							</div>
+						</div>
+						<div class="bottom-panel-pane" id="bottomPaneSubagents">
+							<div class="bottom-panel-list" id="subagentsPanelList">
+								<div class="latest-changes-empty">暂无子代理运行</div>
+							</div>
+						</div>
+						<div class="bottom-panel-pane" id="bottomPaneChanges">
+							<div class="latest-changes-list" id="latestChangesList">
+								<div class="latest-changes-empty">Loading latest changes...</div>
+							</div>
+						</div>
 					</div>
 				</div>
-				<div class="latest-changes-resize-handle" id="latestChangesResizeHandle" title="Drag to resize latest changes panel"></div>
-				<div class="latest-changes-list" id="latestChangesList">
-					<div class="latest-changes-empty">Loading latest changes...</div>
+				<div class="bottom-panel-tabs" id="bottomPanelTabs">
+					<button class="bottom-panel-tab active" id="bottomTabTasks" onclick="setBottomPanelTab('tasks')">任务</button>
+					<button class="bottom-panel-tab" id="bottomTabSubagents" onclick="setBottomPanelTab('subagents')">子代理</button>
+					<button class="bottom-panel-tab" id="bottomTabChanges" onclick="setBottomPanelTab('changes')">编辑</button>
 				</div>
 			</section>
 			

@@ -85,6 +85,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let attachedImages = []; // Array of { filePath, previewUri }
 		let latestChangesItems = [];
 		let latestChangesSessionTitle = '';
+		let latestTodosItems = [];
+		let latestSubagentItems = [];
+		let activeBottomPanelTab = 'tasks';
 		let attachedSessionMessages = [];
 		let attachedSessionPreviewCollapsed = false;
 		let ignoreStreamAfterStop = false;
@@ -345,7 +348,22 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				contentDiv.className = 'tool-input-content';
 				
 				// Handle TodoWrite specially or format raw input
+				if (data.toolName === 'Agent' && data.rawInput) {
+					latestSubagentItems.unshift({
+						id: 'agent-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+						description: data.rawInput.description || data.toolInfo || '子代理任务',
+						subagentType: data.rawInput.subagent_type || '',
+						prompt: data.rawInput.prompt || '',
+						status: 'running',
+						toolUseId: data.toolUseId || ''
+					});
+					latestSubagentItems = latestSubagentItems.slice(0, 20);
+					renderBottomPanel();
+				}
+
 				if (data.toolName === 'TodoWrite' && data.rawInput.todos) {
+					latestTodosItems = Array.isArray(data.rawInput.todos) ? data.rawInput.todos : [];
+					renderBottomPanel();
 					let todoHtml = 'Todo List Update:';
 					for (const todo of data.rawInput.todos) {
 						const status = todo.status === 'completed' ? '✅' :
@@ -476,6 +494,14 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				}
 				lastPendingEditIndex = -1;
 				lastPendingEditData = null;
+			}
+
+			if (data.toolName === 'Agent') {
+				const target = latestSubagentItems.find(item => item.status === 'running');
+				if (target) {
+					target.status = data.isError ? 'error' : 'completed';
+				}
+				renderBottomPanel();
 			}
 
 			// For Read and TodoWrite tools, just hide loading state (no result message needed)
@@ -1071,16 +1097,99 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		function initializeLatestChangesPanel() {
+			latestChangesHeight = 220;
 			applyLatestChangesPanelState();
-			latestChangesHeight = 148;
+			renderBottomPanel();
+		}
+
+		function setBottomPanelTab(tab) {
+			activeBottomPanelTab = tab;
+			renderBottomPanel();
+		}
+
+		function renderTodosPanel() {
+			const listEl = document.getElementById('todosPanelList');
+			if (!listEl) return;
+			if (!latestTodosItems || latestTodosItems.length === 0) {
+				listEl.innerHTML = '<div class="latest-changes-empty">暂无任务运行</div>';
+				return;
+			}
+			listEl.innerHTML = latestTodosItems.map(todo => {
+				const icon = todo.status === 'completed' ? '✅' : todo.status === 'in_progress' ? '🔄' : '⬜';
+				return '<div class="bottom-panel-task-item">' +
+					'<div class="bottom-panel-task-status">' + icon + '</div>' +
+					'<div class="bottom-panel-task-content">' + escapeHtml(todo.content || '') + '</div>' +
+				'</div>';
+			}).join('');
+		}
+
+		function renderSubagentsPanel() {
+			const listEl = document.getElementById('subagentsPanelList');
+			if (!listEl) return;
+			if (!latestSubagentItems || latestSubagentItems.length === 0) {
+				listEl.innerHTML = '<div class="latest-changes-empty">暂无子代理运行</div>';
+				return;
+			}
+			listEl.innerHTML = latestSubagentItems.map(item => {
+				const statusLabel = item.status === 'running' ? '运行中' : item.status === 'completed' ? '已完成' : '失败';
+				const typeLabel = item.subagentType || 'general-purpose';
+				return '<div class="bottom-panel-subagent-item">' +
+					'<div class="bottom-panel-subagent-header">' +
+						'<div class="bottom-panel-subagent-title">' + escapeHtml(item.description || '子代理任务') + '</div>' +
+						'<div class="bottom-panel-subagent-status ' + escapeHtml(item.status || 'running') + '">' + escapeHtml(statusLabel) + '</div>' +
+					'</div>' +
+					'<div class="bottom-panel-subagent-meta">' + escapeHtml(typeLabel) + '</div>' +
+					(item.prompt ? '<div class="bottom-panel-subagent-prompt">' + escapeHtml(item.prompt) + '</div>' : '') +
+				'</div>';
+			}).join('');
+		}
+
+		function renderBottomPanel() {
+			const titleEl = document.getElementById('bottomPanelTitle');
+			const emptyEl = document.getElementById('bottomPanelEmptyCard');
+			const actionsEl = document.getElementById('bottomPanelActions');
+				const sessionEl = document.getElementById('latestChangesSession');
+			const tabs = {
+				tasks: document.getElementById('bottomTabTasks'),
+				subagents: document.getElementById('bottomTabSubagents'),
+				changes: document.getElementById('bottomTabChanges')
+			};
+			const panes = {
+				tasks: document.getElementById('bottomPaneTasks'),
+				subagents: document.getElementById('bottomPaneSubagents'),
+				changes: document.getElementById('bottomPaneChanges')
+			};
+			Object.entries(tabs).forEach(([key, el]) => el && el.classList.toggle('active', key === activeBottomPanelTab));
+			Object.entries(panes).forEach(([key, el]) => el && el.classList.toggle('active', key === activeBottomPanelTab));
+			if (titleEl) {
+				titleEl.textContent = activeBottomPanelTab === 'tasks' ? '任务' : activeBottomPanelTab === 'subagents' ? '子代理' : '编辑';
+			}
+			if (actionsEl) {
+				actionsEl.innerHTML = activeBottomPanelTab === 'changes'
+					? '<button class="latest-changes-btn" onclick="acceptAllLatestChanges()" title="Accept all latest changes">Accept All</button>' +
+					  '<button class="latest-changes-btn danger" onclick="rejectAllLatestChanges()" title="Reject all latest changes">Reject All</button>' +
+					  '<button class="latest-changes-btn" onclick="refreshLatestChanges()" title="Refresh latest changes">↻</button>'
+					: '';
+			}
+			if (emptyEl) {
+				if (activeBottomPanelTab === 'tasks') {
+					emptyEl.textContent = latestTodosItems.length ? '' : '暂无任务运行';
+					emptyEl.style.display = latestTodosItems.length ? 'none' : 'block';
+				} else if (activeBottomPanelTab === 'subagents') {
+					emptyEl.textContent = latestSubagentItems.length ? '' : '暂无子代理运行';
+					emptyEl.style.display = latestSubagentItems.length ? 'none' : 'block';
+				} else {
+					emptyEl.textContent = latestChangesItems.length ? '' : '暂无编辑记录';
+					emptyEl.style.display = latestChangesItems.length ? 'none' : 'block';
+				}
+			}
+			renderTodosPanel();
+			renderLatestChanges();
 		}
 
 		function renderLatestChanges() {
-			const sessionEl = document.getElementById('latestChangesSession');
 			const listEl = document.getElementById('latestChangesList');
-			if (!listEl || !sessionEl) return;
-
-			sessionEl.textContent = latestChangesSessionTitle || '';
+			if (!listEl) return;
 
 			if (!latestChangesItems || latestChangesItems.length === 0) {
 				listEl.innerHTML = '<div class="latest-changes-empty">No latest changes</div>';
@@ -5908,7 +6017,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			if (message.type === 'latestChangesData') {
 				latestChangesItems = (message.data && message.data.items) || [];
 				latestChangesSessionTitle = (message.data && message.data.sessionTitle) || '';
-				renderLatestChanges();
+				renderBottomPanel();
 			}
 
 			if (message.type === 'latestChangeReverted' && message.data) {
