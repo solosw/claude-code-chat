@@ -5525,8 +5525,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				opt.textContent = profile.name;
 				select.appendChild(opt);
 			});
-			if (!activeOpenAIBridgeProfileId && openaiBridgeProfiles.length > 0) {
-				activeOpenAIBridgeProfileId = openaiBridgeProfiles[0].id;
+			const hasActiveProfile = openaiBridgeProfiles.some(function(profile) { return profile.id === activeOpenAIBridgeProfileId; });
+			if (!hasActiveProfile) {
+				activeOpenAIBridgeProfileId = (openaiBridgeProfiles[0] && openaiBridgeProfiles[0].id) || '';
 			}
 			select.value = activeOpenAIBridgeProfileId || '';
 			handleOpenAIBridgeProfileChange();
@@ -5563,6 +5564,27 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			document.getElementById('openaiBridgeUpstreamTimeoutMs').value = profile ? String(profile.upstreamTimeoutMs || 600000) : '600000';
 		}
 
+		function createOpenAIBridgeProfile() {
+			const profileId = 'bridge-' + Date.now();
+			const profile = {
+				id: profileId,
+				name: 'OpenAI Bridge',
+				bridgeBaseUrl: 'http://127.0.0.1:8787',
+				upstreamBaseUrl: 'https://opencode.ai/zen/go/v1',
+				apiKey: '',
+				model: 'deepseek-v4-pro[1m]',
+				fastModel: 'deepseek-v4-flash',
+				reasoningContent: 'auto',
+				reasoningCachePath: '',
+				requestBodyLimitBytes: 104857600,
+				upstreamTimeoutMs: 600000
+			};
+			openaiBridgeProfiles.push(profile);
+			activeOpenAIBridgeProfileId = profileId;
+			renderOpenAIBridgeProfileOptions();
+			vscode.postMessage({ type: 'saveOpenAIBridgeProfile', profile: profile });
+		}
+
 		function saveOpenAIBridgeProfile() {
 			vscode.postMessage({
 				type: 'saveOpenAIBridgeProfile',
@@ -5584,7 +5606,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 		function deleteOpenAIBridgeProfile() {
 			if (!activeOpenAIBridgeProfileId) return;
-			vscode.postMessage({ type: 'deleteOpenAIBridgeProfile', profileId: activeOpenAIBridgeProfileId });
+			const deletedProfileId = activeOpenAIBridgeProfileId;
+			vscode.postMessage({ type: 'deleteOpenAIBridgeProfile', profileId: deletedProfileId });
+			openaiBridgeProfiles = openaiBridgeProfiles.filter(function(item) { return item.id !== deletedProfileId; });
+			activeOpenAIBridgeProfileId = (openaiBridgeProfiles[0] && openaiBridgeProfiles[0].id) || '';
+			renderOpenAIBridgeProfileOptions();
 		}
 
 		function applyOpenAIBridgeProfile() {
@@ -5946,7 +5972,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				activeEnvPresetId = message.data['environment.activePresetId'] || (envPresets[0] && envPresets[0].id) || '';
 				renderEnvPresetOptions();
 				openaiBridgeProfiles = Array.isArray(message.data['openaiBridge.profiles']) ? message.data['openaiBridge.profiles'] : [];
-				activeOpenAIBridgeProfileId = (openaiBridgeProfiles[0] && openaiBridgeProfiles[0].id) || '';
+				if (!openaiBridgeProfiles.some(function(profile) { return profile.id === activeOpenAIBridgeProfileId; })) {
+					activeOpenAIBridgeProfileId = (openaiBridgeProfiles[0] && openaiBridgeProfiles[0].id) || '';
+				}
 				renderOpenAIBridgeProfileOptions();
 				const bridgeStatus = document.getElementById('openaiBridgeRuntimeStatus');
 				if (bridgeStatus) {

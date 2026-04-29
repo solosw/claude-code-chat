@@ -1300,7 +1300,7 @@ async function handleChatCompletions(req, res) {
 }
 
 function createServer() {
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const startedAt = Date.now();
     res.on("finish", () => logRequest(req, res, startedAt));
 
@@ -1328,6 +1328,16 @@ function createServer() {
           body.upstream_probe = await probeUpstream(req);
         }
         sendJson(res, 200, body);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/shutdown") {
+        sendJson(res, 200, { ok: true, shutting_down: true });
+        setTimeout(() => {
+          flushReasoningCache();
+          server.close(() => process.exit(0));
+          setTimeout(() => process.exit(0), 5000).unref();
+        }, 0);
         return;
       }
 
@@ -1361,6 +1371,7 @@ function createServer() {
       }
     }
   });
+  return server;
 }
 
 function installShutdownHandlers(server) {

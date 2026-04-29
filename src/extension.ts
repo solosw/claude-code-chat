@@ -348,6 +348,7 @@ class ClaudeChatProvider {
 	private _currentClaudeProcessKillContext: ClaudeProcessKillContext | undefined;
 	private _openAIBridgeProcess: cp.ChildProcess | undefined;
 	private _openAIBridgeRuntimeState: OpenAIBridgeRuntimeState | undefined;
+	private _openAIBridgeRemoteControlled = false;
 	private _abortController: AbortController | undefined;
 	private _isWslProcess: boolean = false;
 	private _wslDistro: string = 'Ubuntu';
@@ -551,6 +552,50 @@ class ClaudeChatProvider {
 		await config.update('openaiBridge.profiles', profiles, vscode.ConfigurationTarget.Global);
 	}
 
+	private _bridgePresetId(profileId: string): string {
+		return 'bridge-preset-' + profileId;
+	}
+
+	private _bridgeProfileIdFromPresetId(presetId: string | undefined): string | undefined {
+		if (!presetId || !presetId.startsWith('bridge-preset-')) {
+			return undefined;
+		}
+		return presetId.replace('bridge-preset-', '');
+	}
+
+	private async _upsertDerivedBridgePreset(config: vscode.WorkspaceConfiguration, profile: OpenAIBridgeProfile): Promise<void> {
+		const preset = this._buildEnvPresetFromBridgeProfile(profile);
+		const presets = this._getEnvPresets(config);
+		const existingIndex = presets.findIndex(item => item.id === preset.id);
+		if (existingIndex >= 0) {
+			presets[existingIndex] = preset;
+		} else {
+			presets.push(preset);
+		}
+		await this._saveEnvPresets(config, presets);
+	}
+
+	private async _removeDerivedBridgePreset(config: vscode.WorkspaceConfiguration, profileId: string): Promise<void> {
+		const presetId = this._bridgePresetId(profileId);
+		const presets = this._getEnvPresets(config).filter(item => item.id !== presetId);
+		await this._saveEnvPresets(config, presets);
+	}
+
+	private _syncBridgeProfileFromEnvVars(profile: OpenAIBridgeProfile, envVars: EnvPresetVariables): OpenAIBridgeProfile {
+		return {
+			...profile,
+			bridgeBaseUrl: envVars.ANTHROPIC_BASE_URL || profile.bridgeBaseUrl,
+			apiKey: envVars.ANTHROPIC_AUTH_TOKEN || profile.apiKey,
+			model: envVars.ANTHROPIC_MODEL || profile.model,
+			fastModel: envVars.ANTHROPIC_SMALL_FAST_MODEL || profile.fastModel,
+			sonnetModel: envVars.ANTHROPIC_DEFAULT_SONNET_MODEL || profile.sonnetModel || '',
+			opusModel: envVars.ANTHROPIC_DEFAULT_OPUS_MODEL || profile.opusModel || '',
+			haikuModel: envVars.ANTHROPIC_DEFAULT_HAIKU_MODEL || profile.haikuModel || '',
+			subagentModel: envVars.CLAUDE_CODE_SUBAGENT_MODEL || profile.subagentModel || '',
+			effortLevel: envVars.CLAUDE_CODE_EFFORT_LEVEL || profile.effortLevel || 'max'
+		};
+	}
+
 	private _buildEnvPresetFromBridgeProfile(profile: OpenAIBridgeProfile): EnvPreset {
 		const model = profile.model || 'deepseek-v4-pro[1m]';
 		const fastModel = profile.fastModel || 'deepseek-v4-flash';
@@ -603,6 +648,13 @@ class ClaudeChatProvider {
 			profiles.push(normalized);
 		}
 		await this._saveOpenAIBridgeProfiles(config, profiles);
+		await this._upsertDerivedBridgePreset(config, normalized);
+		const activePresetId = config.get<string>('environment.activePresetId', '');
+		if (activePresetId === this._bridgePresetId(profileId)) {
+			const envPreset = this._buildEnvPresetFromBridgeProfile(normalized);
+			await config.update('environment.variables', envPreset.variables, vscode.ConfigurationTarget.Global);
+			await this._writeUserClaudeEnv(envPreset.variables);
+		}
 		this._sendCurrentSettings();
 	}
 
@@ -611,6 +663,15 @@ class ClaudeChatProvider {
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
 		const profiles = this._getOpenAIBridgeProfiles(config).filter(item => item.id !== profileId);
 		await this._saveOpenAIBridgeProfiles(config, profiles);
+		await this._removeDerivedBridgePreset(config, profileId);
+		const presetId = this._bridgePresetId(profileId);
+		const activePresetId = config.get<string>('environment.activePresetId', '');
+		if (activePresetId === presetId) {
+			await config.update('environment.activePresetId', '', vscode.ConfigurationTarget.Global);
+			await config.update('environment.variables', this._createEmptyEnvPresetVariables(), vscode.ConfigurationTarget.Global);
+			await this._writeUserClaudeEnv(this._createEmptyEnvPresetVariables());
+			await this._stopOpenAIBridge();
+		}
 		this._sendCurrentSettings();
 	}
 
@@ -619,9 +680,8 @@ class ClaudeChatProvider {
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
 		const profile = this._getOpenAIBridgeProfiles(config).find(item => item.id === profileId);
 		if (!profile) return;
-		const preset = this._buildEnvPresetFromBridgeProfile(profile);
-		await this._saveEnvPreset(preset);
-		await this._activateEnvPreset(preset.id);
+		await this._upsertDerivedBridgePreset(config, profile);
+		await this._activateEnvPreset(this._bridgePresetId(profile.id));
 	}
 
 	private _getBundledOpenAIBridgeDir(): string {
@@ -649,13 +709,37 @@ class ClaudeChatProvider {
 		return configPath;
 	}
 
+	private async _probeExistingOpenAIBridge(profileId: string, port: number): Promise<boolean> {
+		try {
+			const response = await fetch(`http://127.0.0.1:${port}/health`);
+			if (!response.ok) {
+				return false;
+			}
+			this._openAIBridgeProcess = undefined;
+			this._openAIBridgeRemoteControlled = true;
+			this._openAIBridgeRuntimeState = {
+				status: 'ready',
+				profileId,
+				port,
+				message: 'Reusing existing healthy bridge (managed remotely)'
+			};
+			this._sendCurrentSettings();
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
 	private async _startOpenAIBridge(profileId: string | undefined): Promise<void> {
 		if (!profileId) return;
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
 		const profile = this._getOpenAIBridgeProfiles(config).find(item => item.id === profileId);
 		if (!profile) return;
-		await this._stopOpenAIBridge();
 		const port = Number((profile.bridgeBaseUrl.match(/:(\d+)(?:\/)?$/) || [])[1] || 8787);
+		if (await this._probeExistingOpenAIBridge(profileId, port)) {
+			return;
+		}
+		await this._stopOpenAIBridge();
 		this._openAIBridgeRuntimeState = { status: 'starting', profileId, port, message: 'Bridge starting...' };
 		this._sendCurrentSettings();
 		const dir = this._getBundledOpenAIBridgeDir();
@@ -664,6 +748,7 @@ class ClaudeChatProvider {
 			cwd: dir,
 			stdio: ['ignore', 'pipe', 'pipe']
 		});
+		this._openAIBridgeRemoteControlled = false;
 		this._openAIBridgeProcess = proc;
 		this._openAIBridgeRuntimeState = { status: 'running', profileId, port, pid: proc.pid, message: 'Bridge started, waiting for readiness...' };
 		proc.once('exit', (code, signal) => {
@@ -681,16 +766,26 @@ class ClaudeChatProvider {
 	}
 
 	public async _stopOpenAIBridge(): Promise<void> {
-		const proc = this._openAIBridgeProcess;
-		if (!proc) {
-			return;
+		const runtime = this._openAIBridgeRuntimeState;
+		if (this._openAIBridgeRemoteControlled && runtime?.port) {
+			try {
+				await fetch(`http://127.0.0.1:${runtime.port}/shutdown`, {
+					method: 'POST'
+				});
+			} catch {
+				// ignore remote shutdown failure and continue cleanup
+			}
 		}
-		try {
-			proc.kill();
-		} catch {
-			// ignore
+		const proc = this._openAIBridgeProcess;
+		if (proc) {
+			try {
+				proc.kill();
+			} catch {
+				// ignore
+			}
 		}
 		this._openAIBridgeProcess = undefined;
+		this._openAIBridgeRemoteControlled = false;
 		if (this._openAIBridgeRuntimeState) {
 			this._openAIBridgeRuntimeState = { ...this._openAIBridgeRuntimeState, status: 'stopped', message: 'Bridge stopped' };
 		}
@@ -918,7 +1013,7 @@ class ClaudeChatProvider {
 				await this._applyOpenAIBridgeProfile(message.profileId);
 				return;
 			case 'startOpenAIBridge':
-				await this._startOpenAIBridge(message.profileId);
+				await this._applyOpenAIBridgeProfile(message.profileId);
 				return;
 			case 'stopOpenAIBridge':
 				await this._stopOpenAIBridge();
@@ -3329,15 +3424,7 @@ class ClaudeChatProvider {
 
 	public async _writeUserClaudeEnv(envVars: Record<string, string>): Promise<void> {
 		const settings = await this._readUserClaudeSettings();
-		const existingEnv = settings.env && typeof settings.env === 'object' ? settings.env : {};
-		const normalizedEnv = this._normalizeEnvPresetVariables({
-			...existingEnv,
-			...envVars,
-		});
-		settings.env = {
-			...existingEnv,
-			...normalizedEnv,
-		};
+		settings.env = this._normalizeEnvPresetVariables(envVars || {});
 		await this._writeUserClaudeSettings(settings);
 	}
 
@@ -4322,6 +4409,19 @@ class ClaudeChatProvider {
 							: preset
 						);
 						await this._saveEnvPresets(config, updatedPresets);
+						const bridgeProfileId = this._bridgeProfileIdFromPresetId(activePresetId);
+						if (bridgeProfileId) {
+							const profiles = this._getOpenAIBridgeProfiles(config);
+							const updatedProfiles = profiles.map(profile => profile.id === bridgeProfileId
+								? this._syncBridgeProfileFromEnvVars(profile, normalizedEnvVars)
+								: profile
+							);
+							await this._saveOpenAIBridgeProfiles(config, updatedProfiles);
+							const syncedProfile = updatedProfiles.find(profile => profile.id === bridgeProfileId);
+							if (syncedProfile) {
+								await this._upsertDerivedBridgePreset(config, syncedProfile);
+							}
+						}
 					}
 				} else {
 					await config.update(key, value, vscode.ConfigurationTarget.Global);
@@ -4383,12 +4483,26 @@ class ClaudeChatProvider {
 	private async _activateEnvPreset(presetId: string | undefined): Promise<void> {
 		if (!presetId) return;
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const bridgeProfileId = this._bridgeProfileIdFromPresetId(presetId);
+		if (bridgeProfileId) {
+			const profile = this._getOpenAIBridgeProfiles(config).find(item => item.id === bridgeProfileId);
+			if (!profile) {
+				await this._removeDerivedBridgePreset(config, bridgeProfileId);
+				await config.update('environment.activePresetId', '', vscode.ConfigurationTarget.Global);
+				await config.update('environment.variables', this._createEmptyEnvPresetVariables(), vscode.ConfigurationTarget.Global);
+				await this._writeUserClaudeEnv(this._createEmptyEnvPresetVariables());
+				await this._stopOpenAIBridge();
+				vscode.window.showWarningMessage('The selected Bridge environment is stale because its source profile no longer exists.');
+				this._sendCurrentSettings();
+				return;
+			}
+			await this._upsertDerivedBridgePreset(config, profile);
+		}
 		const envVars = await this._setActiveEnvPreset(config, presetId);
 		await this._writeUserClaudeEnv(envVars);
 
-		if (presetId.startsWith('bridge-preset-')) {
-			const profileId = presetId.replace('bridge-preset-', '');
-			await this._startOpenAIBridge(profileId);
+		if (bridgeProfileId) {
+			await this._startOpenAIBridge(bridgeProfileId);
 		} else {
 			await this._stopOpenAIBridge();
 		}
