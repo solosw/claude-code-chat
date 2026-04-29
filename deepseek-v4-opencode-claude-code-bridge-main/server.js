@@ -556,10 +556,48 @@ function stringifyToolResultContent(content) {
     .map((block) => {
       if (!block) return "";
       if (block.type === "text") return block.text || "";
+      if (block.type === "image") {
+        const src = block.source || {};
+        return `[Image: ${src.media_type || "image"}]`;
+      }
       return JSON.stringify(block);
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function imageBlockToOpenAi(block) {
+  if (!block || block.type !== "image" || !block.source) return null;
+  if (block.source.type !== "base64") return null;
+  const mediaType = block.source.media_type || "image/png";
+  const data = typeof block.source.data === "string" ? block.source.data : "";
+  if (!data) return null;
+  return {
+    type: "image_url",
+    image_url: {
+      url: `data:${mediaType};base64,${data}`,
+    },
+  };
+}
+
+function userBlockToOpenAi(block) {
+  if (!block || typeof block !== "object") return null;
+  if (block.type === "text" && typeof block.text === "string") {
+    return { type: "text", text: block.text };
+  }
+  if (block.type === "image") {
+    return imageBlockToOpenAi(block);
+  }
+  return null;
+}
+
+function buildUserContent(blocks) {
+  const parts = (Array.isArray(blocks) ? blocks : [])
+    .map(userBlockToOpenAi)
+    .filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1 && parts[0].type === "text") return parts[0].text;
+  return parts;
 }
 
 function systemToOpenAi(system) {
@@ -609,7 +647,8 @@ function anthropicMessagesToOpenAi(messages, includeReasoningContent) {
         currentUserTurnHadToolCall = false;
         currentToolContext = [];
       }
-      if (text) out.push({ role: "user", content: text });
+      const userContent = buildUserContent(blocks);
+      if (userContent) out.push({ role: "user", content: userContent });
       for (const result of toolResults) {
         if (currentUserTurnHadToolCall) currentToolContext.push(toolResultSignature(result));
         out.push({
