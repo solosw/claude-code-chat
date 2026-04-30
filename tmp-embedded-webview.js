@@ -1,16 +1,13 @@
-import getSkillsScript from './skills-script';
-import getPluginsScript from './plugins-script';
 
-const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https://ccc.api.opencredits.ai', opencreditsWebUrl: string = 'https://ccc.opencredits.ai', opencreditsPublishableKey: string = 'oc_pk_c43da4f9a9484ae484ad29bc97cc354f') => `<script>
-		var OPENCREDITS_API_URL = '${opencreditsApiUrl}';
-		var OPENCREDITS_WEB_URL = '${opencreditsWebUrl}';
+		var OPENCREDITS_API_URL = 'https://ccc.api.opencredits.ai';
+		var OPENCREDITS_WEB_URL = 'https://ccc.opencredits.ai';
 
 		// ─── OpenCredits SDK (inlined) ───
 		!function(){var e="https://opencredits.ai",t="",o="",n={},a=null,r=null,i=null,d=null,c=!1,s=null;function l(){var e=document.getElementById("oc-overlay");e&&(e.remove(),document.body.style.overflow=""),r=null,i=null}function u(e){if(e){a=e;try{localStorage.setItem(d,e)}catch(e){}}}function p(e,t){n[e]&&n[e](function(e){if(!e||"object"!=typeof e)return e;var t={};for(var o in e)"source"!==o&&"event"!==o&&(t[o]=e[o]);return t}(t))}function m(e){if(e.data&&"opencredits"===e.data.source&&r&&e.source===r.contentWindow&&e.origin===o){var t=e.data.event;if("ready"===t){var l={source:"opencredits_init",publishable_key:d,currency:n.currency||"usd",checkout_mode:n.checkoutMode||"embedded"};i&&i.amount&&(l.amount=i.amount),i&&i.model&&(l.model=i.model),n.inputTokens&&(l.input_tokens=n.inputTokens),n.outputTokens&&(l.output_tokens=n.outputTokens),a&&(l.user_key=a),r.contentWindow.postMessage(l,o)}else if("checkout_opened"===t)u(e.data.user_key),e.data.checkout_url&&"new_tab"===n.checkoutMode&&window.open(e.data.checkout_url,"_blank"),p("onCheckoutOpened",e.data);else if("purchase_completed"===t)u(e.data.user_key),c=!0,s={user_key:a,balance:e.data.balance,credits_added:e.data.credits_added},p("onPurchaseCompleted",e.data),e.data.can_close&&p("onComplete",s);else if("purchase_error"===t)p("onPurchaseError",e.data),p("onError",e.data);else if("login_completed"===t)u(e.data.user_key),p("onLoginCompleted",e.data);else if("logged_out"===t){a=null;try{localStorage.removeItem(d)}catch(e){}p("onLoggedOut",e.data)}else"copy_url"===t?p("onCopyUrl",e.data):"open_url"===t?p("onOpenUrl",e.data):"account_details_shown"===t?p("onAccountDetailsShown",e.data):"account_details_dismissed"===t&&(p("onAccountDetailsDismissed",e.data),c&&p("onComplete",s))}}window.OpenCredits={init:function(r){if(!(d=(n=r||{}).publishableKey))throw new Error("OpenCredits: publishableKey is required");e=n.baseUrl||window.OPENCREDITS_ORIGIN||"https://opencredits.ai",t=e+"/embed/checkout.html",o=new URL(t).origin,a=localStorage.getItem(d)||n.userKey||null,window.addEventListener("message",m)},open:function(e){if(e=e||{},!d)throw new Error("OpenCredits: call init() first");c=!1,s=null;var o=document.createElement("div");o.id="oc-overlay",o.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;animation:ocFadeIn .2s ease";var n=document.createElement("div");n.style.cssText="background:#fff;border-radius:16px;width:480px;max-width:95vw;height:680px;max-height:90vh;overflow:hidden;position:relative;box-shadow:0 24px 48px rgba(0,0,0,0.2);animation:ocSlideUp .25s ease";var a=document.createElement("button");if(a.innerHTML="&times;",a.style.cssText="position:absolute;top:12px;right:12px;z-index:10;width:32px;height:32px;border-radius:50%;border:none;background:rgba(0,0,0,0.06);cursor:pointer;font-size:18px;color:#666;display:flex;align-items:center;justify-content:center",a.onmouseover=function(){a.style.background="rgba(0,0,0,0.12)",a.style.color="#000"},a.onmouseout=function(){a.style.background="rgba(0,0,0,0.06)",a.style.color="#666"},a.onclick=function(){l()},(r=document.createElement("iframe")).style.cssText="width:100%;height:100%;border:none",r.src=t,n.appendChild(a),n.appendChild(r),o.appendChild(n),o.onclick=function(e){e.target===o&&l()},document.body.appendChild(o),document.body.style.overflow="hidden",i=e,!document.getElementById("oc-keyframes")){var u=document.createElement("style");u.id="oc-keyframes",u.textContent="@keyframes ocFadeIn{from{opacity:0}to{opacity:1}}@keyframes ocSlideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}",document.head.appendChild(u)}},close:l,getUserKey:function(){return a}}}();
 
 		// ─── Initialize OpenCredits SDK ───
 		OpenCredits.init({
-			publishableKey: '${opencreditsPublishableKey}',
+			publishableKey: 'oc_pk_c43da4f9a9484ae484ad29bc97cc354f',
 			baseUrl: OPENCREDITS_WEB_URL,
 			checkoutMode: 'manual',
 			currency: 'usd',
@@ -120,8 +117,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const textBefore = messageInput.value.substring(0, cursorPos);
 			const textAfter = messageInput.value.substring(cursorPos);
 			const refs = items.map(item => '@' + item.path + (item.isDirectory ? '/' : '')).join(' ');
-			const spacerBefore = textBefore && !/\\s$/.test(textBefore) ? ' ' : '';
-			const spacerAfter = textAfter && !/^\\s/.test(textAfter) ? ' ' : '';
+			const spacerBefore = textBefore && !/\s$/.test(textBefore) ? ' ' : '';
+			const spacerAfter = textAfter && !/^\s/.test(textAfter) ? ' ' : '';
 			const insertedText = spacerBefore + refs + spacerAfter;
 			messageInput.value = textBefore + insertedText + textAfter;
 			const newCursorPos = textBefore.length + insertedText.length;
@@ -488,19 +485,19 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 		function createExpandableInput(toolInput, rawInput) {
 			try {
-				let html = toolInput.replace(/\\[expand\\]/g, '<span class="expand-btn" onclick="toggleExpand(this)">expand</span>');
+				let html = toolInput.replace(/\[expand\]/g, '<span class="expand-btn" onclick="toggleExpand(this)">expand</span>');
 				
 				// Store raw input data for expansion
 				if (rawInput && typeof rawInput === 'object') {
 					let btnIndex = 0;
-					html = html.replace(/<span class="expand-btn"[^>]*>expand<\\/span>/g, (match) => {
+					html = html.replace(/<span class="expand-btn"[^>]*>expand<\/span>/g, (match) => {
 						const keys = Object.keys(rawInput);
 						const key = keys[btnIndex] || '';
 						const value = rawInput[key] || '';
 						const valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 						const escapedValue = valueStr.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 						btnIndex++;
-						return \`<span class="expand-btn" data-key="\${key}" data-value="\${escapedValue}" onclick="toggleExpand(this)">expand</span>\`;
+						return `<span class="expand-btn" data-key="${key}" data-value="${escapedValue}" onclick="toggleExpand(this)">expand</span>`;
 					});
 				}
 				
@@ -594,7 +591,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 			// Clean up error messages by removing XML-like tags
 			if (data.isError && content) {
-				content = content.replace(/<tool_use_error>/g, '').replace(/<\\/tool_use_error>/g, '').trim();
+				content = content.replace(/<tool_use_error>/g, '').replace(/<\/tool_use_error>/g, '').trim();
 			}
 			if (content.length > 200 && !data.isError) {
 				const truncateAt = 197;
@@ -613,7 +610,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				const expandButton = document.createElement('button');
 				expandButton.className = 'diff-expand-btn';
 				expandButton.textContent = 'Show more';
-				expandButton.setAttribute('onclick', 'toggleResultExpansion(\\'' + resultId + '\\\')');
+				expandButton.setAttribute('onclick', 'toggleResultExpansion(\'' + resultId + '\')');
 				expandContainer.appendChild(expandButton);
 				contentDiv.appendChild(expandContainer);
 			} else {
@@ -629,12 +626,12 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			if (data.isError && isPermissionError(content)) {
 				const yoloSuggestion = document.createElement('div');
 				yoloSuggestion.className = 'yolo-suggestion';
-				yoloSuggestion.innerHTML = \`
+				yoloSuggestion.innerHTML = `
 					<div class="yolo-suggestion-text">
 						<span>💡 This looks like a permission issue. You can enable Yolo Mode to skip all permission checks.</span>
 					</div>
 					<button class="yolo-suggestion-btn" onclick="enableYoloMode()">Enable Yolo Mode</button>
-				\`;
+				`;
 				messageDiv.appendChild(yoloSuggestion);
 			}
 			
@@ -683,7 +680,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						   '<span id="' + inputId + '_ellipsis">...</span>' +
 						   '<span id="' + inputId + '_hidden" style="display: none;">' + escapeHtml(str.substring(truncateAt)) + '</span>' +
 						   '<div class="diff-expand-container">' +
-						   '<button class="diff-expand-btn" onclick="toggleResultExpansion(\\\'' + inputId + '\\\')">Show more</button>' +
+						   '<button class="diff-expand-btn" onclick="toggleResultExpansion(\'' + inputId + '\')">Show more</button>' +
 						   '</div>';
 				}
 				return str;
@@ -692,7 +689,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			// Special handling for Read tool with file_path
 			if (input.file_path && Object.keys(input).length === 1) {
 				const formattedPath = formatFilePath(input.file_path);
-				return '<div class="diff-file-path" onclick="openFileInEditor(\\\'' + escapeHtml(input.file_path) + '\\\')">' + formattedPath + '</div>';
+				return '<div class="diff-file-path" onclick="openFileInEditor(\'' + escapeHtml(input.file_path) + '\')">' + formattedPath + '</div>';
 			}
 
 			let result = '';
@@ -700,13 +697,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			for (const [key, value] of Object.entries(input)) {
 				const valueStr = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 				
-				if (!isFirst) result += '\\n';
+				if (!isFirst) result += '\n';
 				isFirst = false;
 				
 				// Special formatting for file_path in Read tool context
 				if (key === 'file_path') {
 					const formattedPath = formatFilePath(valueStr);
-					result += '<div class="diff-file-path" onclick="openFileInEditor(\\\'' + escapeHtml(valueStr) + '\\\')">' + formattedPath + '</div>';
+					result += '<div class="diff-file-path" onclick="openFileInEditor(\'' + escapeHtml(valueStr) + '\')">' + formattedPath + '</div>';
 				} else if (valueStr.length > 100) {
 					const truncated = valueStr.substring(0, 97) + '...';
 					const escapedValue = valueStr.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -762,12 +759,12 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				return {startLine: 1, lines: []};
 			}
 
-			const lines = resultContent.split('\\n');
+			const lines = resultContent.split('\n');
 			const parsed = [];
 			let startLine = null;
 
 			for (const line of lines) {
-				const match = line.match(/^\\s*(\\d+)→(.*)$/);
+				const match = line.match(/^\s*(\d+)→(.*)$/);
 				if (match) {
 					const lineNum = parseInt(match[1]);
 					const content = match[2];
@@ -782,8 +779,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		// Generate unified diff HTML with line numbers
 		// showButton controls whether to show the "Open Diff" button
 		function generateUnifiedDiffHTML(oldString, newString, filePath, startLine = 1, showButton = false) {
-			const oldLines = oldString.split('\\n');
-			const newLines = newString.split('\\n');
+			const oldLines = oldString.split('\n');
+			const newLines = newString.split('\n');
 			const diff = computeLineDiff(oldLines, newLines);
 
 			// Generate unique ID for this diff (used for truncation)
@@ -794,8 +791,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 			// Header with file path
 			html += '<div class="diff-file-header">';
-			html += '<div class="diff-file-path" onclick="openFileInEditor(\\\'' + escapeHtml(filePath) + '\\\')">' + formattedPath + '</div>';
-			html += '</div>\\n';
+			html += '<div class="diff-file-path" onclick="openFileInEditor(\'' + escapeHtml(filePath) + '\')">' + formattedPath + '</div>';
+			html += '</div>\n';
 
 			// Calculate line range
 			let firstLine = startLine;
@@ -864,7 +861,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 				// Add expand button
 				html += '<div class="diff-expand-container">';
-				html += '<button class="diff-expand-btn" onclick="toggleDiffExpansion(\\'' + diffId + '\\')">Show ' + hiddenLines.length + ' more lines</button>';
+				html += '<button class="diff-expand-btn" onclick="toggleDiffExpansion(\'' + diffId + '\')">Show ' + hiddenLines.length + ' more lines</button>';
 				html += '</div>';
 			}
 
@@ -911,7 +908,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				if (position !== -1) {
 					// Count newlines before the match to get line number
 					const textBefore = fileContentBefore.substring(0, position);
-					startLine = (textBefore.match(/\\n/g) || []).length + 1;
+					startLine = (textBefore.match(/\n/g) || []).length + 1;
 				}
 			}
 
@@ -931,8 +928,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			// Show full diffs for each edit
 			const formattedPath = formatFilePath(input.file_path);
 			let html = '<div class="diff-file-header">';
-			html += '<div class="diff-file-path" onclick="openFileInEditor(\\\'' + escapeHtml(input.file_path) + '\\\')">' + formattedPath + '</div>';
-			html += '</div>\\n';
+			html += '<div class="diff-file-path" onclick="openFileInEditor(\'' + escapeHtml(input.file_path) + '\')">' + formattedPath + '</div>';
+			html += '</div>\n';
 
 			input.edits.forEach((edit, index) => {
 				if (edit.old_string && edit.new_string) {
@@ -946,12 +943,12 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						const position = fileContentBefore.indexOf(edit.old_string);
 						if (position !== -1) {
 							const textBefore = fileContentBefore.substring(0, position);
-							startLine = (textBefore.match(/\\n/g) || []).length + 1;
+							startLine = (textBefore.match(/\n/g) || []).length + 1;
 						}
 					}
 
-					const oldLines = edit.old_string.split('\\n');
-					const newLines = edit.new_string.split('\\n');
+					const oldLines = edit.old_string.split('\n');
+					const newLines = edit.new_string.split('\n');
 					const diff = computeLineDiff(oldLines, newLines);
 
 					html += '<div class="diff-container">';
@@ -1052,7 +1049,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		function toggleResultExpansion(resultId) {
 			const hiddenDiv = document.getElementById(resultId + '_hidden');
 			const ellipsis = document.getElementById(resultId + '_ellipsis');
-			const button = document.querySelector('[onclick*="toggleResultExpansion(\\'' + resultId + '\\\')"]');
+			const button = document.querySelector('[onclick*="toggleResultExpansion(\'' + resultId + '\')"]');
 			
 			if (hiddenDiv && button) {
 				if (hiddenDiv.style.display === 'none') {
@@ -1236,8 +1233,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		function getLatestChangeLineStats(item) {
-			const oldLines = (item.oldContent || '').split(/\\r?\\n/);
-			const newLines = (item.newContent || '').split(/\\r?\\n/);
+			const oldLines = (item.oldContent || '').split(/\r?\n/);
+			const newLines = (item.newContent || '').split(/\r?\n/);
 			let added = 0;
 			let removed = 0;
 			let oldIndex = 0;
@@ -1394,7 +1391,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				});
 				vscode.postMessage({
 					type: 'showInfoMessage',
-					message: 'Ultrathink enabled \u2014 deep reasoning for complex tasks.'
+					message: 'Ultrathink enabled — deep reasoning for complex tasks.'
 				});
 			} else {
 				if (switchElement) switchElement.classList.remove('active');
@@ -1431,7 +1428,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				if (toggleBtn) toggleBtn.classList.add('active');
 				vscode.postMessage({
 					type: 'showInfoMessage',
-					message: 'Plan mode enabled \u2014 Claude will plan before making changes.'
+					message: 'Plan mode enabled — Claude will plan before making changes.'
 				});
 			} else {
 				if (switchElement) switchElement.classList.remove('active');
@@ -1451,25 +1448,17 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 		// Send usage statistics
 		function sendStats(eventName, properties) {
-			${isTelemetryEnabled ?
-			`try {
-				if (typeof umami !== 'undefined' && umami.track) {
-					umami.track(eventName, properties);
-				}
-			} catch (error) {
-				console.error('Error sending stats:', error);
-			}` :
-			`// Telemetry disabled - no tracking`}
+			// Telemetry disabled - no tracking
 		}
 
 		function updateStatus(text, state = 'ready') {
 			statusTextDiv.textContent = text;
-			statusDiv.className = \`status \${state}\`;
+			statusDiv.className = `status ${state}`;
 		}
 
 		function updateStatusHtml(html, state = 'ready') {
 			statusTextDiv.innerHTML = html;
-			statusDiv.className = \`status \${state}\`;
+			statusDiv.className = `status ${state}`;
 		}
 
 		function viewUsage(usageType) {
@@ -1482,7 +1471,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				let elapsedStr = '';
 				if (requestStartTime) {
 					const elapsedSeconds = Math.floor((Date.now() - requestStartTime) / 1000);
-					elapsedStr = \`\${elapsedSeconds}s\`;
+					elapsedStr = `${elapsedSeconds}s`;
 				}
 
 				const silenceMs = lastStreamActivityAt ? (Date.now() - lastStreamActivityAt) : 0;
@@ -1509,39 +1498,39 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			} else {
 				// When ready, show full info
 				let usageStr;
-				const usageIcon = \`<svg class="usage-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+				const usageIcon = `<svg class="usage-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 					<rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor" opacity="0.5"/>
 					<rect x="5.5" y="5" width="3" height="9" rx="0.5" fill="currentColor" opacity="0.7"/>
 					<rect x="10" y="2" width="3" height="12" rx="0.5" fill="currentColor"/>
-				</svg>\`;
+				</svg>`;
 
 				if (hasOpenCreditsKey && openCreditsBalance !== null) {
 					// OpenCredits user with OpenCredits model selected: show balance
-					const balanceStr = \`Balance: \${openCreditsBalance.toFixed(1)} credits\`;
-					usageStr = \`<a href="#" onclick="event.preventDefault(); OpenCredits.open();" class="usage-badge opencredits-balance" title="Open OpenCredits Account">\${balanceStr}</a>\`;
+					const balanceStr = `Balance: ${openCreditsBalance.toFixed(1)} credits`;
+					usageStr = `<a href="#" onclick="event.preventDefault(); OpenCredits.open();" class="usage-badge opencredits-balance" title="Open OpenCredits Account">${balanceStr}</a>`;
 				} else if (subscriptionType) {
 					// Plan subscriber: show plan type
-					let planName = subscriptionType.replace(/^claude\\s*/i, '').trim();
+					let planName = subscriptionType.replace(/^claude\s*/i, '').trim();
 					planName = planName.charAt(0).toUpperCase() + planName.slice(1);
-					usageStr = \`<a href="#" onclick="event.preventDefault(); viewUsage('plan');" class="usage-badge" title="View live usage">\${planName} Plan\${usageIcon}</a>\`;
+					usageStr = `<a href="#" onclick="event.preventDefault(); viewUsage('plan');" class="usage-badge" title="View live usage">${planName} Plan${usageIcon}</a>`;
 				} else {
 					// API user: show cost
-					const costStr = totalCost > 0 ? \`$\${totalCost.toFixed(4)}\` : '$0.00';
-					usageStr = \`<a href="#" onclick="event.preventDefault(); viewUsage('api');" class="usage-badge" title="View usage">\${costStr}\${usageIcon}</a>\`;
+					const costStr = totalCost > 0 ? `$${totalCost.toFixed(4)}` : '$0.00';
+					usageStr = `<a href="#" onclick="event.preventDefault(); viewUsage('api');" class="usage-badge" title="View usage">${costStr}${usageIcon}</a>`;
 				}
 
 				let statusText;
 				if (hasOpenCreditsKey) {
 					// OpenCredits users with OpenCredits model: just show ready and balance (no tokens)
-					const requestStr = requestCount > 0 ? \`\${requestCount} requests\` : '';
-					statusText = \`Ready\${requestStr ? \` • \${requestStr}\` : ''} • \${usageStr}\`;
+					const requestStr = requestCount > 0 ? `${requestCount} requests` : '';
+					statusText = `Ready${requestStr ? ` • ${requestStr}` : ''} • ${usageStr}`;
 				} else {
 					// Regular users: show tokens, requests, and usage
 					const totalTokens = totalTokensInput + totalTokensOutput;
 					const tokensStr = totalTokens > 0 ?
-						\`\${totalTokens.toLocaleString()} tokens\` : '0 tokens';
-					const requestStr = requestCount > 0 ? \`\${requestCount} requests\` : '';
-					statusText = \`Ready • \${tokensStr}\${requestStr ? \` • \${requestStr}\` : ''} • \${usageStr}\`;
+						`${totalTokens.toLocaleString()} tokens` : '0 tokens';
+					const requestStr = requestCount > 0 ? `${requestCount} requests` : '';
+					statusText = `Ready • ${tokensStr}${requestStr ? ` • ${requestStr}` : ''} • ${usageStr}`;
 				}
 				updateStatusHtml(statusText, 'ready');
 			}
@@ -1639,7 +1628,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 			const uriList = dataTransfer.getData('text/uri-list');
 			if (uriList) {
-				uriList.split(/\\r?\\n/).forEach(line => {
+				uriList.split(/\r?\n/).forEach(line => {
 					const value = line.trim();
 					if (value && !value.startsWith('#')) {
 						collected.push(value);
@@ -1649,7 +1638,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 			const plainText = dataTransfer.getData('text/plain');
 			if (plainText) {
-				plainText.split(/\\r?\\n/).forEach(line => {
+				plainText.split(/\r?\n/).forEach(line => {
 					const value = line.trim();
 					if (value && looksLikeDroppedPath(value)) {
 						collected.push(value);
@@ -2055,7 +2044,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				for (let server of existingServers) {
 					if (server.textContent === name) {
 						const notification = document.createElement('div');
-						notification.textContent = \`Server "\${name}" already exists\`;
+						notification.textContent = `Server "${name}" already exists`;
 						notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-inputValidation-errorForeground); padding: 8px 12px; border-radius: 4px; z-index: 9999;';
 						document.body.appendChild(notification);
 						setTimeout(() => notification.remove(), 3000);
@@ -2080,13 +2069,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 				const argsText = document.getElementById('serverArgs').value.trim();
 				if (argsText) {
-					serverConfig.args = argsText.split('\\n').filter(line => line.trim());
+					serverConfig.args = argsText.split('\n').filter(line => line.trim());
 				}
 
 				const envText = document.getElementById('serverEnv').value.trim();
 				if (envText) {
 					serverConfig.env = {};
-					envText.split('\\n').forEach(line => {
+					envText.split('\n').forEach(line => {
 						const [key, ...valueParts] = line.split('=');
 						if (key && valueParts.length > 0) {
 							serverConfig.env[key.trim()] = valueParts.join('=').trim();
@@ -2108,7 +2097,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				const headersText = document.getElementById('serverHeaders').value.trim();
 				if (headersText) {
 					serverConfig.headers = {};
-					headersText.split('\\n').forEach(line => {
+					headersText.split('\n').forEach(line => {
 						const [key, ...valueParts] = line.split('=');
 						if (key && valueParts.length > 0) {
 							serverConfig.headers[key.trim()] = valueParts.join('=').trim();
@@ -2181,15 +2170,15 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				document.getElementById('serverUrl').value = config.url;
 			}
 			if (config.args && Array.isArray(config.args)) {
-				document.getElementById('serverArgs').value = config.args.join('\\n');
+				document.getElementById('serverArgs').value = config.args.join('\n');
 			}
 			if (config.env) {
-				const envLines = Object.entries(config.env).map(([key, value]) => \`\${key}=\${value}\`);
-				document.getElementById('serverEnv').value = envLines.join('\\n');
+				const envLines = Object.entries(config.env).map(([key, value]) => `${key}=${value}`);
+				document.getElementById('serverEnv').value = envLines.join('\n');
 			}
 			if (config.headers) {
-				const headerLines = Object.entries(config.headers).map(([key, value]) => \`\${key}=\${value}\`);
-				document.getElementById('serverHeaders').value = headerLines.join('\\n');
+				const headerLines = Object.entries(config.headers).map(([key, value]) => `${key}=${value}`);
+				document.getElementById('serverHeaders').value = headerLines.join('\n');
 			}
 			
 			// Update form field visibility
@@ -2208,7 +2197,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			for (let server of existingServers) {
 				if (server.textContent === name) {
 					const notification = document.createElement('div');
-					notification.textContent = \`Server "\${name}" already exists\`;
+					notification.textContent = `Server "${name}" already exists`;
 					notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-inputValidation-errorForeground); padding: 8px 12px; border-radius: 4px; z-index: 9999;';
 					document.body.appendChild(notification);
 					setTimeout(() => notification.remove(), 3000);
@@ -2560,7 +2549,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				document.getElementById('serverType').value = 'stdio';
 				updateServerForm();
 				document.getElementById('serverCommand').value = cfg.command || '';
-				document.getElementById('serverArgs').value = (cfg.args || []).join('\\n');
+				document.getElementById('serverArgs').value = (cfg.args || []).join('\n');
 				if (cfg.env) {
 					var envLines = [];
 					for (var k in cfg.env) {
@@ -2568,7 +2557,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 							envLines.push(k + '=' + cfg.env[k]);
 						}
 					}
-					document.getElementById('serverEnv').value = envLines.join('\\n');
+					document.getElementById('serverEnv').value = envLines.join('\n');
 				}
 			} else {
 				document.getElementById('serverType').value = cfg.type === 'sse' ? 'sse' : 'http';
@@ -2609,29 +2598,29 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				let configDisplay = '';
 
 				if (serverType === 'stdio') {
-					configDisplay = \`Command: \${config.command || 'Not specified'}\`;
+					configDisplay = `Command: ${config.command || 'Not specified'}`;
 					if (config.args && Array.isArray(config.args)) {
-						configDisplay += \`<br>Args: \${config.args.join(' ')}\`;
+						configDisplay += `<br>Args: ${config.args.join(' ')}`;
 					}
 				} else if (serverType === 'http' || serverType === 'sse') {
-					configDisplay = \`URL: \${config.url || 'Not specified'}\`;
+					configDisplay = `URL: ${config.url || 'Not specified'}`;
 				} else {
-					configDisplay = \`Type: \${serverType}\`;
+					configDisplay = `Type: ${serverType}`;
 				}
 
 				const scopeLabel = serverScope === 'global' ? 'Global' : serverScope === 'project' ? 'Project' : 'Extension';
 
-				serverItem.innerHTML = \`
+				serverItem.innerHTML = `
 					<div class="server-info">
-						<div class="server-name">\${name} <span style="font-size:10px;opacity:0.5;font-weight:normal;">\${scopeLabel}</span></div>
-						<div class="server-type">\${serverType.toUpperCase()}</div>
-						<div class="server-config">\${configDisplay}</div>
+						<div class="server-name">${name} <span style="font-size:10px;opacity:0.5;font-weight:normal;">${scopeLabel}</span></div>
+						<div class="server-type">${serverType.toUpperCase()}</div>
+						<div class="server-config">${configDisplay}</div>
 					</div>
 					<div class="server-actions">
-						<button class="btn outlined server-edit-btn" onclick="editMCPServer('\${name}', \${JSON.stringify(config).replace(/"/g, '&quot;')})">Edit</button>
-						<button class="btn outlined server-delete-btn" onclick="deleteMCPServer('\${name}', '\${serverScope}')">Delete</button>
+						<button class="btn outlined server-edit-btn" onclick="editMCPServer('${name}', ${JSON.stringify(config).replace(/"/g, '&quot;')})">Edit</button>
+						<button class="btn outlined server-delete-btn" onclick="deleteMCPServer('${name}', '${serverScope}')">Delete</button>
 					</div>
-				\`;
+				`;
 				
 				serversList.appendChild(serverItem);
 			}
@@ -3255,7 +3244,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			// Remove suffixes like ":thinking", ":free"
 			name = name.split(':')[0];
 			// Replace hyphens/underscores with spaces and capitalize words
-			name = name.replace(/[-_]/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
+			name = name.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 			return name;
 		}
 
@@ -3644,7 +3633,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			if (command === 'compact') {
 				// No message needed - compact runs in chat and shows its own status
 			} else {
-				addMessage('user', \`Executing /\${command} command in terminal. Check the terminal output and return when ready.\`, 'assistant');
+				addMessage('user', `Executing /${command} command in terminal. Check the terminal output and return when ready.`, 'assistant');
 			}
 		}
 
@@ -3751,16 +3740,16 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				snippetElement.className = 'slash-command-item prompt-snippet-item custom-snippet-item';
 				snippetElement.onclick = () => usePromptSnippet(snippet.id);
 				
-				snippetElement.innerHTML = \`
+				snippetElement.innerHTML = `
 					<div class="slash-command-icon">📝</div>
 					<div class="slash-command-content">
-						<div class="slash-command-title">/\${snippet.name}</div>
-						<div class="slash-command-description">\${snippet.prompt}</div>
+						<div class="slash-command-title">/${snippet.name}</div>
+						<div class="slash-command-description">${snippet.prompt}</div>
 					</div>
 					<div class="snippet-actions">
-						<button class="snippet-delete-btn" onclick="event.stopPropagation(); deleteCustomSnippet('\${snippet.id}')" title="Delete snippet">🗑️</button>
+						<button class="snippet-delete-btn" onclick="event.stopPropagation(); deleteCustomSnippet('${snippet.id}')" title="Delete snippet">🗑️</button>
 					</div>
-				\`;
+				`;
 				
 				// Insert after the form
 				addForm.parentNode.insertBefore(snippetElement, addForm.nextSibling);
@@ -4032,7 +4021,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						let displayData = message.data;
 						
 						// Check if this is a usage limit message with Unix timestamp
-						const usageLimitMatch = displayData.match(/Claude AI usage limit reached\\|(\\d+)/);
+						const usageLimitMatch = displayData.match(/Claude AI usage limit reached\|(\d+)/);
 						if (usageLimitMatch) {
 							const timestamp = parseInt(usageLimitMatch[1]);
 							const date = new Date(timestamp * 1000);
@@ -4151,11 +4140,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						showSessionInfo(message.data.sessionId);
 						// Show detailed session information
 						const sessionDetails = [
-							\`🆔 Session ID: \${message.data.sessionId}\`,
-							\`🔧 Tools Available: \${message.data.tools.length}\`,
-							\`🖥️ MCP Servers: \${message.data.mcpServers ? message.data.mcpServers.length : 0}\`
+							`🆔 Session ID: ${message.data.sessionId}`,
+							`🔧 Tools Available: ${message.data.tools.length}`,
+							`🖥️ MCP Servers: ${message.data.mcpServers ? message.data.mcpServers.length : 0}`
 						];
-						//addMessage(sessionDetails.join('\\n'), 'system');
+						//addMessage(sessionDetails.join('\n'), 'system');
 					}
 					break;
 					
@@ -4176,13 +4165,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					// Show detailed token breakdown for current message
 					const currentTotal = (message.data.currentInputTokens || 0) + (message.data.currentOutputTokens || 0);
 					if (currentTotal > 0) {
-						let tokenBreakdown = \`📊 Tokens: \${currentTotal.toLocaleString()}\`;
+						let tokenBreakdown = `📊 Tokens: ${currentTotal.toLocaleString()}`;
 						
 						if (message.data.cacheCreationTokens || message.data.cacheReadTokens) {
 							const cacheInfo = [];
-							if (message.data.cacheCreationTokens) cacheInfo.push(\`\${message.data.cacheCreationTokens.toLocaleString()} cache created\`);
-							if (message.data.cacheReadTokens) cacheInfo.push(\`\${message.data.cacheReadTokens.toLocaleString()} cache read\`);
-							tokenBreakdown += \` • \${cacheInfo.join(' • ')}\`;
+							if (message.data.cacheCreationTokens) cacheInfo.push(`${message.data.cacheCreationTokens.toLocaleString()} cache created`);
+							if (message.data.cacheReadTokens) cacheInfo.push(`${message.data.cacheReadTokens.toLocaleString()} cache read`);
+							tokenBreakdown += ` • ${cacheInfo.join(' • ')}`;
 						}
 						
 						addMessage(tokenBreakdown, 'system');
@@ -4201,9 +4190,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 					// Show current request info if available (only for direct API users, not OpenCredits)
 					if (!subscriptionType && !hasOpenCreditsKey && (message.data.currentCost || message.data.currentDuration)) {
-						const currentCostStr = message.data.currentCost ? \`$\${message.data.currentCost.toFixed(4)}\` : 'N/A';
-						const currentDurationStr = message.data.currentDuration ? \`\${message.data.currentDuration}ms\` : 'N/A';
-						addMessage(\`Request completed - Cost: \${currentCostStr}, Duration: \${currentDurationStr}\`, 'system');
+						const currentCostStr = message.data.currentCost ? `$${message.data.currentCost.toFixed(4)}` : 'N/A';
+						const currentDurationStr = message.data.currentDuration ? `${message.data.currentDuration}ms` : 'N/A';
+						addMessage(`Request completed - Cost: ${currentCostStr}, Duration: ${currentDurationStr}`, 'system');
 					}
 					break;
 
@@ -4230,7 +4219,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				case 'sessionResumed':
 					closeActiveStreamMessage();
 					showSessionInfo(message.data.sessionId);
-					addMessage('📝 Resumed previous session\\n🆔 Session ID: ' + message.data.sessionId + '\\n💡 Your conversation history is preserved', 'system');
+					addMessage('📝 Resumed previous session\n🆔 Session ID: ' + message.data.sessionId + '\n💡 Your conversation history is preserved', 'system');
 					break;
 					
 				case 'sessionCleared':
@@ -4417,7 +4406,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 			const messageDiv = document.createElement('div');
 			messageDiv.className = 'message permission-request';
-			messageDiv.id = \`permission-\${data.id}\`;
+			messageDiv.id = `permission-${data.id}`;
 			messageDiv.dataset.status = data.status || 'pending';
 
 			let toolName = data.tool || 'Unknown Tool';
@@ -4425,28 +4414,28 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const status = data.status || 'pending';
 
 			// Create always allow button text with command styling for Bash
-			let alwaysAllowText = \`Always allow \${toolName}\`;
+			let alwaysAllowText = `Always allow ${toolName}`;
 			let alwaysAllowTooltip = '';
 			if (toolName === 'Bash' && data.pattern) {
 				const pattern = data.pattern;
 				// Remove the asterisk for display - show "npm i" instead of "npm i *"
 				const displayPattern = pattern.replace(' *', '');
 				const truncatedPattern = displayPattern.length > 30 ? displayPattern.substring(0, 30) + '...' : displayPattern;
-				alwaysAllowText = \`Always allow <code>\${truncatedPattern}</code>\`;
-				alwaysAllowTooltip = displayPattern.length > 30 ? \`title="\${displayPattern}"\` : '';
+				alwaysAllowText = `Always allow <code>${truncatedPattern}</code>`;
+				alwaysAllowTooltip = displayPattern.length > 30 ? `title="${displayPattern}"` : '';
 			}
 
 			// Show different content based on status
 			let contentHtml = '';
 			if (status === 'pending') {
-				contentHtml = \`
+				contentHtml = `
 					<div class="permission-header">
 						<span class="icon">🔐</span>
 						<span>Permission Required</span>
 						<div class="permission-menu">
-							<button class="permission-menu-btn" onclick="togglePermissionMenu('\${data.id}')" title="More options">⋮</button>
-							<div class="permission-menu-dropdown" id="permissionMenu-\${data.id}" style="display: none;">
-								<button class="permission-menu-item" onclick="enableYoloMode('\${data.id}')">
+							<button class="permission-menu-btn" onclick="togglePermissionMenu('${data.id}')" title="More options">⋮</button>
+							<div class="permission-menu-dropdown" id="permissionMenu-${data.id}" style="display: none;">
+								<button class="permission-menu-item" onclick="enableYoloMode('${data.id}')">
 									<span class="menu-icon">⚡</span>
 									<div class="menu-content">
 										<span class="menu-title">Enable YOLO Mode</span>
@@ -4457,49 +4446,49 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 						</div>
 					</div>
 					<div class="permission-content">
-						<p>\${data.tool === 'ExitPlanMode' ? 'Approve the plan above?' : 'Allow <strong>' + toolName + '</strong> to execute the tool call above?'}</p>
+						<p>${data.tool === 'ExitPlanMode' ? 'Approve the plan above?' : 'Allow <strong>' + toolName + '</strong> to execute the tool call above?'}</p>
 						<div class="permission-buttons">
-							<button class="btn deny" onclick="respondToPermission('\${data.id}', false)">Deny</button>
-							\${data.tool === 'ExitPlanMode' ? '' : '<button class="btn always-allow" onclick="respondToPermission(\\'' + data.id + '\\', true, true)" ' + alwaysAllowTooltip + '>' + alwaysAllowText + '</button>'}
-							<button class="btn allow" onclick="respondToPermission('\${data.id}', true)">\${data.tool === 'ExitPlanMode' ? 'Approve' : 'Allow'}</button>
+							<button class="btn deny" onclick="respondToPermission('${data.id}', false)">Deny</button>
+							${data.tool === 'ExitPlanMode' ? '' : '<button class="btn always-allow" onclick="respondToPermission(\'' + data.id + '\', true, true)" ' + alwaysAllowTooltip + '>' + alwaysAllowText + '</button>'}
+							<button class="btn allow" onclick="respondToPermission('${data.id}', true)">${data.tool === 'ExitPlanMode' ? 'Approve' : 'Allow'}</button>
 						</div>
 					</div>
-				\`;
+				`;
 			} else if (status === 'approved') {
-				contentHtml = \`
+				contentHtml = `
 					<div class="permission-header">
 						<span class="icon">🔐</span>
 						<span>Permission Required</span>
 					</div>
 					<div class="permission-content">
-						<p>Allow <strong>\${toolName}</strong> to execute the tool call above?</p>
+						<p>Allow <strong>${toolName}</strong> to execute the tool call above?</p>
 						<div class="permission-decision allowed">✅ You allowed this</div>
 					</div>
-				\`;
+				`;
 				messageDiv.classList.add('permission-decided', 'allowed');
 			} else if (status === 'denied') {
-				contentHtml = \`
+				contentHtml = `
 					<div class="permission-header">
 						<span class="icon">🔐</span>
 						<span>Permission Required</span>
 					</div>
 					<div class="permission-content">
-						<p>Allow <strong>\${toolName}</strong> to execute the tool call above?</p>
+						<p>Allow <strong>${toolName}</strong> to execute the tool call above?</p>
 						<div class="permission-decision denied">❌ You denied this</div>
 					</div>
-				\`;
+				`;
 				messageDiv.classList.add('permission-decided', 'denied');
 			} else if (status === 'cancelled' || status === 'expired') {
-				contentHtml = \`
+				contentHtml = `
 					<div class="permission-header">
 						<span class="icon">🔐</span>
 						<span>Permission Required</span>
 					</div>
 					<div class="permission-content">
-						<p>Allow <strong>\${toolName}</strong> to execute the tool call above?</p>
+						<p>Allow <strong>${toolName}</strong> to execute the tool call above?</p>
 						<div class="permission-decision expired">⏱️ This request expired</div>
 					</div>
-				\`;
+				`;
 				messageDiv.classList.add('permission-decided', 'expired');
 			}
 
@@ -4509,7 +4498,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		function updatePermissionStatus(id, status) {
-			const permissionMsg = document.getElementById(\`permission-\${id}\`);
+			const permissionMsg = document.getElementById(`permission-${id}`);
 			if (!permissionMsg) return;
 
 			permissionMsg.dataset.status = status;
@@ -4562,7 +4551,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			});
 			
 			// Update the UI to show the decision
-			const permissionMsg = document.querySelector(\`.permission-request:has([onclick*="\${id}"])\`);
+			const permissionMsg = document.querySelector(`.permission-request:has([onclick*="${id}"])`);
 			if (permissionMsg) {
 				const buttons = permissionMsg.querySelector('.permission-buttons');
 				const permissionContent = permissionMsg.querySelector('.permission-content');
@@ -4580,8 +4569,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				
 				// Add decision div to permission-content
 				const decisionDiv = document.createElement('div');
-				decisionDiv.className = \`permission-decision \${decisionClass}\`;
-				decisionDiv.innerHTML = \`\${emoji} \${decision}\`;
+				decisionDiv.className = `permission-decision ${decisionClass}`;
+				decisionDiv.innerHTML = `${emoji} ${decision}`;
 				permissionContent.appendChild(decisionDiv);
 				
 				permissionMsg.classList.add('permission-decided', decisionClass);
@@ -4589,7 +4578,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		function togglePermissionMenu(permissionId) {
-			const menu = document.getElementById(\`permissionMenu-\${permissionId}\`);
+			const menu = document.getElementById(`permissionMenu-${permissionId}`);
 			const isVisible = menu.style.display !== 'none';
 			
 			// Close all other permission menus
@@ -4605,7 +4594,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			sendStats('YOLO mode enabled');
 			
 			// Hide the menu
-			document.getElementById(\`permissionMenu-\${permissionId}\`).style.display = 'none';
+			document.getElementById(`permissionMenu-${permissionId}`).style.display = 'none';
 			
 			// Send message to enable YOLO mode
 			vscode.postMessage({
@@ -4677,7 +4666,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 
 			var buttonsHtml = isResolved ? '' :
 				'<div class="ask-question-buttons">' +
-				'<button class="btn allow" onclick="submitAskUserQuestionAnswers(\\'' + data.id + '\\')">Submit</button>' +
+				'<button class="btn allow" onclick="submitAskUserQuestionAnswers(\'' + data.id + '\')">Submit</button>' +
 				'</div>';
 
 			var decisionHtml = '';
@@ -4809,24 +4798,24 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			
 			const restoreContainer = document.createElement('div');
 			restoreContainer.className = 'restore-container';
-			restoreContainer.id = \`restore-\${data.sha}\`;
+			restoreContainer.id = `restore-${data.sha}`;
 			
 			const timeAgo = new Date(data.timestamp).toLocaleTimeString();
 			const shortSha = data.sha ? data.sha.substring(0, 8) : 'unknown';
 			
-			restoreContainer.innerHTML = \`
-				<button class="restore-btn dark" onclick="restoreToCommit('\${data.sha}')">
+			restoreContainer.innerHTML = `
+				<button class="restore-btn dark" onclick="restoreToCommit('${data.sha}')">
 					Restore checkpoint
 				</button>
-				<span class="restore-date">\${timeAgo}</span>
-			\`;
+				<span class="restore-date">${timeAgo}</span>
+			`;
 			
 			messagesDiv.appendChild(restoreContainer);
 			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
 		}
 
 		function hideRestoreContainer(commitSha) {
-			const container = document.getElementById(\`restore-\${commitSha}\`);
+			const container = document.getElementById(`restore-${commitSha}`);
 			if (container) {
 				container.remove();
 			}
@@ -4841,7 +4830,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			
 			if (sessionStatus && newSessionBtn) {
 				// sessionIdSpan.textContent = sessionId.substring(0, 8);
-				// sessionIdSpan.title = \`Full session ID: \${sessionId} (click to copy)\`;
+				// sessionIdSpan.title = `Full session ID: ${sessionId} (click to copy)`;
 				// sessionIdSpan.style.cursor = 'pointer';
 				// sessionIdSpan.onclick = () => copySessionId(sessionId);
 				// sessionInfo.style.display = 'flex';
@@ -4896,11 +4885,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			
 			// Handle multi-line code blocks with triple backticks
 			// Using RegExp constructor to avoid backtick conflicts in template literal
-			const codeBlockRegex = new RegExp('\\\`\\\`\\\`(\\\\w*)\\n([\\\\s\\\\S]*?)\\\`\\\`\\\`', 'g');
+			const codeBlockRegex = new RegExp('\`\`\`(\\w*)\n([\\s\\S]*?)\`\`\`', 'g');
 			processedMarkdown = processedMarkdown.replace(codeBlockRegex, function(match, lang, code) {
 				const language = lang || 'plaintext';
 				// Process code line by line to preserve formatting like diff implementation
-				const codeLines = code.split('\\n');
+				const codeLines = code.split('\n');
 				let codeHtml = '';
 				
 				for (const line of codeLines) {
@@ -4912,7 +4901,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				const codeId = 'code_' + Math.random().toString(36).substr(2, 9);
 				const escapedCode = escapeHtml(code);
 				
-				const codeBlockHtml = '<div class="code-block-container"><div class="code-block-header"><span class="code-block-language">' + language + '</span><button class="code-copy-btn" onclick="copyCodeBlock(\\\'' + codeId + '\\\')" title="Copy code"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button></div><pre class="code-block"><code class="language-' + language + '" id="' + codeId + '" data-raw-code="' + escapedCode.replace(/"/g, '&quot;') + '">' + codeHtml + '</code></pre></div>';
+				const codeBlockHtml = '<div class="code-block-container"><div class="code-block-header"><span class="code-block-language">' + language + '</span><button class="code-copy-btn" onclick="copyCodeBlock(\'' + codeId + '\')" title="Copy code"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button></div><pre class="code-block"><code class="language-' + language + '" id="' + codeId + '" data-raw-code="' + escapedCode.replace(/"/g, '&quot;') + '">' + codeHtml + '</code></pre></div>';
 				
 				// Store the code block and return a placeholder
 				const placeholder = '__CODEBLOCK_' + codeBlockPlaceholders.length + '__';
@@ -4921,10 +4910,10 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			});
 			
 			// Handle inline code with single backticks
-			const inlineCodeRegex = new RegExp('\\\`([^\\\`]+)\\\`', 'g');
+			const inlineCodeRegex = new RegExp('\`([^\`]+)\`', 'g');
 			processedMarkdown = processedMarkdown.replace(inlineCodeRegex, '<code>$1</code>');
 			
-			const lines = processedMarkdown.split('\\n');
+			const lines = processedMarkdown.split('\n');
 			let html = '';
 			let inUnorderedList = false;
 			let inOrderedList = false;
@@ -4940,34 +4929,34 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				}
 
 				// Bold
-				line = line.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
+				line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 
 				// Italic - only apply when underscores are surrounded by whitespace or at beginning/end
-				line = line.replace(/(?<!\\*)\\*(?!\\*)(.*?)\\*(?!\\*)/g, '<em>$1</em>');
-				line = line.replace(/(^|\\s)_([^_\\s][^_]*[^_\\s]|[^_\\s])_(?=\\s|$)/g, '$1<em>$2</em>');
+				line = line.replace(/(?<!\*)\*(?!\*)(.*?)\*(?!\*)/g, '<em>$1</em>');
+				line = line.replace(/(^|\s)_([^_\s][^_]*[^_\s]|[^_\s])_(?=\s|$)/g, '$1<em>$2</em>');
 
 				// Headers
-				if (/^####\\s+/.test(line)) {
-				html += '<h4>' + line.replace(/^####\\s+/, '') + '</h4>';
+				if (/^####\s+/.test(line)) {
+				html += '<h4>' + line.replace(/^####\s+/, '') + '</h4>';
 				continue;
-				} else if (/^###\\s+/.test(line)) {
-				html += '<h3>' + line.replace(/^###\\s+/, '') + '</h3>';
+				} else if (/^###\s+/.test(line)) {
+				html += '<h3>' + line.replace(/^###\s+/, '') + '</h3>';
 				continue;
-				} else if (/^##\\s+/.test(line)) {
-				html += '<h2>' + line.replace(/^##\\s+/, '') + '</h2>';
+				} else if (/^##\s+/.test(line)) {
+				html += '<h2>' + line.replace(/^##\s+/, '') + '</h2>';
 				continue;
-				} else if (/^#\\s+/.test(line)) {
-				html += '<h1>' + line.replace(/^#\\s+/, '') + '</h1>';
+				} else if (/^#\s+/.test(line)) {
+				html += '<h1>' + line.replace(/^#\s+/, '') + '</h1>';
 				continue;
 				}
 
 				// Ordered list
-				if (/^\\d+\\.\\s+/.test(line)) {
+				if (/^\d+\.\s+/.test(line)) {
 				if (!inOrderedList) {
 					html += '<ol>';
 					inOrderedList = true;
 				}
-				const item = line.replace(/^\\d+\\.\\s+/, '');
+				const item = line.replace(/^\d+\.\s+/, '');
 				html += '<li>' + item + '</li>';
 				continue;
 				}
@@ -5144,13 +5133,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					fileItem.classList.add('selected');
 				}
 				
-				fileItem.innerHTML = \`
-					<span class="file-icon">\${getFileIcon(file.name)}</span>
+				fileItem.innerHTML = `
+					<span class="file-icon">${getFileIcon(file.name)}</span>
 					<div class="file-info">
-						<div class="file-name">\${file.name}</div>
-						<div class="file-path">\${file.path}</div>
+						<div class="file-name">${file.name}</div>
+						<div class="file-path">${file.path}</div>
 					</div>
-				\`;
+				`;
 				
 				fileItem.addEventListener('click', () => {
 					selectFile(file);
@@ -5232,8 +5221,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		function showImageAddedFeedback(fileName) {
 			// Create temporary feedback element
 			const feedback = document.createElement('div');
-			feedback.textContent = \`Added: \${fileName}\`;
-			feedback.style.cssText = \`
+			feedback.textContent = `Added: ${fileName}`;
+			feedback.style.cssText = `
 				position: fixed;
 				top: 20px;
 				right: 20px;
@@ -5245,7 +5234,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				z-index: 1000;
 				opacity: 0;
 				transition: opacity 0.3s ease;
-			\`;
+			`;
 			
 			document.body.appendChild(feedback);
 			
@@ -5279,18 +5268,18 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				// Show plan type or cost based on subscription
 				let usageStr;
 				if (subscriptionType) {
-					let planName = subscriptionType.replace(/^claude\\s*/i, '').trim();
+					let planName = subscriptionType.replace(/^claude\s*/i, '').trim();
 					planName = planName.charAt(0).toUpperCase() + planName.slice(1);
 					usageStr = planName;
 				} else {
-					usageStr = \`$\${conv.totalCost.toFixed(3)}\`;
+					usageStr = `$${conv.totalCost.toFixed(3)}`;
 				}
 
-				item.innerHTML = \`
-					<div class="conversation-title">\${conv.firstUserMessage.substring(0, 60)}\${conv.firstUserMessage.length > 60 ? '...' : ''}</div>
-					<div class="conversation-meta">\${date} at \${time} • \${conv.messageCount} messages • \${usageStr}</div>
-					<div class="conversation-preview">Last: \${conv.lastUserMessage.substring(0, 80)}\${conv.lastUserMessage.length > 80 ? '...' : ''}</div>
-				\`;
+				item.innerHTML = `
+					<div class="conversation-title">${conv.firstUserMessage.substring(0, 60)}${conv.firstUserMessage.length > 60 ? '...' : ''}</div>
+					<div class="conversation-meta">${date} at ${time} • ${conv.messageCount} messages • ${usageStr}</div>
+					<div class="conversation-preview">Last: ${conv.lastUserMessage.substring(0, 80)}${conv.lastUserMessage.length > 80 ? '...' : ''}</div>
+				`;
 
 				listDiv.appendChild(item);
 			});
@@ -5762,11 +5751,11 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const permissionsList = document.getElementById('permissionsList');
 			
 			if (!permissions || !permissions.alwaysAllow || Object.keys(permissions.alwaysAllow).length === 0) {
-				permissionsList.innerHTML = \`
+				permissionsList.innerHTML = `
 					<div class="permissions-empty">
 						No always-allow permissions set
 					</div>
-				\`;
+				`;
 				return;
 			}
 			
@@ -5775,28 +5764,28 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			for (const [toolName, permission] of Object.entries(permissions.alwaysAllow)) {
 				if (permission === true) {
 					// Tool is always allowed
-					html += \`
+					html += `
 						<div class="permission-item">
 							<div class="permission-info">
-								<span class="permission-tool">\${toolName}</span>
+								<span class="permission-tool">${toolName}</span>
 								<span class="permission-desc">All</span>
 							</div>
-							<button class="permission-remove-btn" onclick="removePermission('\${toolName}', null)">Remove</button>
+							<button class="permission-remove-btn" onclick="removePermission('${toolName}', null)">Remove</button>
 						</div>
-					\`;
+					`;
 				} else if (Array.isArray(permission)) {
 					// Tool has specific commands/patterns
 					for (const command of permission) {
 						const displayCommand = command.replace(' *', ''); // Remove asterisk for display
-						html += \`
+						html += `
 							<div class="permission-item">
 								<div class="permission-info">
-									<span class="permission-tool">\${toolName}</span>
-									<span class="permission-command"><code>\${displayCommand}</code></span>
+									<span class="permission-tool">${toolName}</span>
+									<span class="permission-command"><code>${displayCommand}</code></span>
 								</div>
-								<button class="permission-remove-btn" onclick="removePermission('\${toolName}', '\${escapeHtml(command)}')">Remove</button>
+								<button class="permission-remove-btn" onclick="removePermission('${toolName}', '${escapeHtml(command)}')">Remove</button>
 							</div>
-						\`;
+						`;
 					}
 				}
 			}
@@ -6219,8 +6208,441 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		initializeLatestChangesPanel();
 		refreshLatestChanges();
 
-	${getSkillsScript()}
-	${getPluginsScript()}
-	</script>`
+	
+		// ─── Skills ───
+		var skillsSearchTimeout = null;
+		var skillsCache = null;
+		var topSkills = (window.__topSkills || []);
 
-export default getScript;
+		function showSkillsModal() {
+			sendStats('Skills modal opened');
+			document.getElementById('skillsModal').style.display = 'flex';
+			loadInstalledSkills();
+			if (topSkills.length > 0) {
+				renderFeaturedSkills(topSkills);
+			}
+		}
+
+		function renderFeaturedSkills(skills) {
+			var grid = document.getElementById('skillsGrid');
+			if (!grid) return;
+			var html = '';
+			skills.forEach(function(skill) {
+				var name = skill.name || 'Unknown';
+				var installs = skill.installs || 0;
+				var source = skill.source || '';
+				var installsHtml = installs > 0 ? '<span class="marketplace-item-stars">' + (installs >= 1000 ? (Math.round(installs / 100) / 10) + 'k' : installs) + ' installs</span>' : '';
+				var safeId = escapeHtml(skill.id || name).replace(/'/g, '&#39;');
+
+				var rawUrl = skill.rawUrl || '';
+				var installsText = installs >= 1000 ? (Math.round(installs / 100) / 10) + 'k installs' : (installs > 0 ? installs + ' installs' : '');
+				html += '<div class="marketplace-item" data-skill-id="' + safeId + '" data-skill-source="' + escapeHtml(source) + '" data-skill-name="' + escapeHtml(name) + '" data-skill-rawurl="' + escapeHtml(rawUrl) + '" data-skill-installs="' + escapeHtml(installsText) + '" onclick="installSkillFromMarketplace(this)">' +
+					'<div class="marketplace-item-header">' +
+					'<div class="marketplace-item-icon-placeholder">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>' +
+					'<div class="marketplace-item-info">' +
+					'<div class="marketplace-item-name">' + escapeHtml(name) + '</div>' +
+					'<div class="marketplace-item-meta">' + installsHtml + '</div>' +
+					'</div>' +
+					'</div>' +
+					'<div class="marketplace-item-desc">' + escapeHtml(source) + '</div>' +
+					'</div>';
+			});
+			grid.innerHTML = html;
+		}
+
+		function hideSkillsModal() {
+			document.getElementById('skillsModal').style.display = 'none';
+		}
+
+		function loadInstalledSkills() {
+			vscode.postMessage({ type: 'loadSkills' });
+		}
+
+		function displaySkills(skills) {
+			var skillsList = document.getElementById('skillsList');
+			skillsList.innerHTML = '';
+
+			if (!skills || skills.length === 0) {
+				skillsList.innerHTML = '<div class="no-servers">' +
+					'<div class="no-servers-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>' +
+					'<div class="no-servers-text">No skills installed</div>' +
+					'<button class="btn outlined no-servers-btn" onclick="showSkillAddForm()">+ Create skill</button>' +
+					'</div>';
+				return;
+			}
+
+			skills.forEach(function(skill, idx) {
+				var item = document.createElement('div');
+				item.className = 'mcp-server-item';
+				item.style.flexDirection = 'column';
+				item.style.alignItems = 'stretch';
+				var desc = skill.description || 'No description';
+				var content = skill.content || '';
+				var detailId = 'skill-detail-' + idx;
+				item.innerHTML = '<div class="skill-item-row">' +
+					'<div class="skill-item-info">' +
+					'<div class="server-name">' + escapeHtml(skill.name) + ' <span class="server-type">' + escapeHtml(skill.scope) + '</span></div>' +
+					'<div class="skill-item-desc">' + escapeHtml(desc) + '</div>' +
+					'</div>' +
+					'<div class="server-actions" style="flex-shrink:0;">' +
+					'<button class="btn outlined" style="font-size:11px;padding:3px 8px;" onclick="toggleSkillDetail(\'' + detailId + '\')">Details</button>' +
+					'<button class="btn outlined server-delete-btn" data-skill="' + escapeHtml(skill.name) + '" data-scope="' + escapeHtml(skill.scope) + '" onclick="deleteSkill(this.dataset.skill, this.dataset.scope)">Delete</button>' +
+					'</div>' +
+					'</div>' +
+					'<div id="' + detailId + '" class="skill-detail-content" style="display:none;">' +
+					'<pre style="white-space:pre-wrap;font-size:11px;color:var(--vscode-descriptionForeground);margin:8px 0 0;max-height:200px;overflow-y:auto;">' + escapeHtml(content) + '</pre>' +
+					'</div>';
+				skillsList.appendChild(item);
+			});
+
+			// Add create button at bottom
+			var addDiv = document.createElement('div');
+			addDiv.className = 'mcp-add-server';
+			addDiv.innerHTML = '<button class="btn outlined" onclick="showSkillAddForm()">+ Create skill</button>';
+			skillsList.appendChild(addDiv);
+		}
+
+		function showSkillAddForm() {
+			document.getElementById('skillsList').style.display = 'none';
+			document.getElementById('skillsMarketplace').style.display = 'none';
+			document.getElementById('skillAddForm').style.display = 'block';
+			// Clear form
+			document.getElementById('skillName').value = '';
+			document.getElementById('skillDescription').value = '';
+			document.getElementById('skillContent').value = '';
+			document.getElementById('skillName').disabled = false;
+		}
+
+		function hideSkillAddForm() {
+			document.getElementById('skillsList').style.display = '';
+			document.getElementById('skillsMarketplace').style.display = 'block';
+			document.getElementById('skillAddForm').style.display = 'none';
+			loadInstalledSkills();
+		}
+
+		function saveSkill() {
+			var name = document.getElementById('skillName').value.trim();
+			var description = document.getElementById('skillDescription').value.trim();
+			var scope = document.getElementById('skillScope').value;
+			var content = document.getElementById('skillContent').value;
+
+			if (!name) return;
+
+			// Build SKILL.md content
+			var skillMd = '---\n';
+			skillMd += 'name: ' + name + '\n';
+			if (description) {
+				skillMd += 'description: ' + description + '\n';
+			}
+			skillMd += '---\n\n';
+			skillMd += content || '';
+
+			vscode.postMessage({
+				type: 'saveSkill',
+				name: name,
+				scope: scope,
+				content: skillMd
+			});
+
+			hideSkillAddForm();
+		}
+
+		function deleteSkill(name, scope) {
+			vscode.postMessage({
+				type: 'deleteSkill',
+				name: name,
+				scope: scope
+			});
+		}
+
+		function searchSkills(query) {
+			clearTimeout(skillsSearchTimeout);
+			skillsSearchTimeout = setTimeout(function() {
+				if (!query || query.length < 2) {
+					renderFeaturedSkills(topSkills);
+					return;
+				}
+				// Filter featured locally first
+				var q = query.toLowerCase();
+				var local = topSkills.filter(function(s) {
+					return (s.name && s.name.toLowerCase().indexOf(q) >= 0) ||
+						(s.source && s.source.toLowerCase().indexOf(q) >= 0);
+				});
+				if (local.length > 0) {
+					renderFeaturedSkills(local);
+				} else {
+					var grid = document.getElementById('skillsGrid');
+					grid.innerHTML = '<div class="marketplace-loading">Searching...</div>';
+				}
+				// Also search API
+				vscode.postMessage({ type: 'searchSkills', query: query });
+			}, 300);
+		}
+
+		function handleSkillsSearchResponse(data) {
+			var grid = document.getElementById('skillsGrid');
+			if (!grid) return;
+
+			var skills = data.skills || [];
+			if (skills.length === 0) {
+				grid.innerHTML = '<div class="marketplace-loading">No skills found.</div>';
+				return;
+			}
+
+			var html = '';
+			skills.forEach(function(skill) {
+				var name = skill.name || skill.skillId || 'Unknown';
+				var installs = skill.installs || 0;
+				var source = skill.source || '';
+				var safeId = escapeHtml(skill.id || name).replace(/'/g, '&#39;');
+
+				var installsHtml = installs > 0 ? '<span class="marketplace-item-stars">' + (installs >= 1000 ? (Math.round(installs / 100) / 10) + 'k' : installs) + ' installs</span>' : '';
+
+				var rawUrl = skill.rawUrl || '';
+				var installsText = installs >= 1000 ? (Math.round(installs / 100) / 10) + 'k installs' : (installs > 0 ? installs + ' installs' : '');
+				html += '<div class="marketplace-item" data-skill-id="' + safeId + '" data-skill-source="' + escapeHtml(source) + '" data-skill-name="' + escapeHtml(name) + '" data-skill-rawurl="' + escapeHtml(rawUrl) + '" data-skill-installs="' + escapeHtml(installsText) + '" onclick="installSkillFromMarketplace(this)">' +
+					'<div class="marketplace-item-header">' +
+					'<div class="marketplace-item-icon-placeholder">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>' +
+					'<div class="marketplace-item-info">' +
+					'<div class="marketplace-item-name">' + escapeHtml(name) + '</div>' +
+					'<div class="marketplace-item-meta">' + installsHtml + '</div>' +
+					'</div>' +
+					'</div>' +
+					'<div class="marketplace-item-desc">' + escapeHtml(source) + '</div>' +
+					'</div>';
+			});
+			grid.innerHTML = html;
+		}
+
+		var skillsDisplayedList = null;
+
+		function installSkillFromMarketplace(el) {
+			var source = el.dataset.skillSource;
+			var name = el.dataset.skillName;
+			var installs = el.dataset.skillInstalls || '';
+
+			if (!source || !name) return;
+
+			var repoUrl = 'https://github.com/' + source.replace(/^github\//, '');
+			var installsHtml = installs ? '<span class="marketplace-item-stars">' + installs + '</span>' : '';
+
+			var grid = document.getElementById('skillsGrid');
+			// Save current grid content to restore on back
+			skillsDisplayedList = grid.innerHTML;
+
+			grid.innerHTML = '<div class="marketplace-detail">' +
+				'<button class="marketplace-back-btn" onclick="backToSkillsList()">&#8592; Back</button>' +
+				'<div class="marketplace-detail-header">' +
+				'<div class="marketplace-item-icon-placeholder" style="width:40px;height:40px;font-size:18px;">' + escapeHtml(name.charAt(0).toUpperCase()) + '</div>' +
+				'<div class="marketplace-detail-header-info">' +
+				'<div class="marketplace-detail-name">' + escapeHtml(name) + '</div>' +
+				'<div class="marketplace-detail-header-meta">' +
+				installsHtml +
+				'<a href="' + escapeHtml(repoUrl) + '" target="_blank" class="marketplace-detail-link">GitHub</a>' +
+				'</div>' +
+				'</div>' +
+				'</div>' +
+				'<div class="marketplace-detail-desc">' + escapeHtml('Source: ' + source) + '</div>' +
+				'<div class="marketplace-detail-config">' +
+				'<div class="marketplace-detail-section-title">Install to</div>' +
+				'<div class="form-group" style="margin:0;">' +
+				'<select id="skillInstallScope">' +
+				'<option value="project">Project (.claude/skills/)</option>' +
+				'<option value="global">Global (~/.claude/skills/)</option>' +
+				'</select>' +
+				'</div>' +
+				'</div>' +
+				'<div class="marketplace-detail-actions" style="margin-top:12px;">' +
+				'<button class="btn" data-source="' + escapeHtml(source) + '" data-name="' + escapeHtml(name) + '" onclick="confirmSkillInstall(this)">Install</button>' +
+				'<div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-top:6px;">Opens a terminal running <code style="font-size:10px;">npx skills add</code> via <a href="https://skills.sh" target="_blank" class="marketplace-detail-link">skills.sh</a></div>' +
+				'</div>' +
+				'</div>';
+		}
+
+		function backToSkillsList() {
+			var grid = document.getElementById('skillsGrid');
+			if (skillsDisplayedList) {
+				grid.innerHTML = skillsDisplayedList;
+			} else {
+				renderFeaturedSkills(topSkills);
+			}
+		}
+
+		function toggleSkillDetail(id) {
+			var el = document.getElementById(id);
+			if (!el) return;
+			el.style.display = el.style.display === 'none' ? 'block' : 'none';
+		}
+
+		function confirmSkillInstall(btn) {
+			var source = btn.dataset.source;
+			var name = btn.dataset.name;
+			sendStats('Skill installed', { name: name, source: source });
+			var scope = document.getElementById('skillInstallScope').value;
+
+			var repoUrl = 'https://github.com/' + source.replace(/^github\//, '');
+			var command = 'npx -y skills add ' + repoUrl + ' --skill ' + name + ' --agent claude-code -y';
+			if (scope === 'global') {
+				command += ' --global';
+			}
+
+			vscode.postMessage({
+				type: 'runTerminalCommand',
+				command: command
+			});
+
+			hideSkillsModal();
+		}
+
+	
+		// ─── Plugins ───
+		var topPlugins = (window.__topPlugins || []);
+		var pluginsDisplayedList = null;
+
+		function formatPluginName(name) {
+			return name.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+		}
+
+		function showPluginsModal() {
+			sendStats('Plugins modal opened');
+			document.getElementById('pluginsModal').style.display = 'flex';
+			loadInstalledPlugins();
+			renderAvailablePlugins(topPlugins);
+		}
+
+		function hidePluginsModal() {
+			document.getElementById('pluginsModal').style.display = 'none';
+		}
+
+		function loadInstalledPlugins() {
+			vscode.postMessage({ type: 'loadPlugins' });
+		}
+
+		function displayPlugins(data) {
+			var pluginsList = document.getElementById('pluginsList');
+			pluginsList.innerHTML = '';
+			var enabled = data.enabled || {};
+
+			var keys = Object.keys(enabled);
+			if (keys.length === 0) {
+				pluginsList.innerHTML = '<div class="no-servers">' +
+					'<div class="no-servers-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></div>' +
+					'<div class="no-servers-text">No plugins enabled</div>' +
+					'</div>';
+				return;
+			}
+
+			keys.forEach(function(installId) {
+				var isEnabled = enabled[installId];
+				var name = installId.replace(/@.*$/, '');
+				var displayName = formatPluginName(name);
+				var plugin = topPlugins.find(function(p) { return p.installId === installId; });
+				var desc = plugin ? plugin.description : '';
+				var verified = plugin ? plugin.verified : false;
+
+				var item = document.createElement('div');
+				item.className = 'mcp-server-item';
+				var verifiedHtml = verified ? '<span class="marketplace-item-verified" title="Anthropic verified">&#10003;</span>' : '';
+				var statusHtml = isEnabled ? '<span class="server-type" style="background:rgba(0,122,204,0.2);color:var(--vscode-charts-blue);">enabled</span>' : '<span class="server-type">disabled</span>';
+				item.innerHTML = '<div class="server-info" style="min-width:0;overflow:hidden;">' +
+					'<div class="server-name">' + escapeHtml(displayName) + verifiedHtml + ' ' + statusHtml + '</div>' +
+					(desc ? '<div class="server-config" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(desc) + '</div>' : '') +
+					'</div>' +
+					'<div class="server-actions" style="flex-shrink:0;">' +
+					'<button class="btn outlined server-delete-btn" data-plugin="' + escapeHtml(installId) + '" onclick="removePlugin(this.dataset.plugin)">Remove</button>' +
+					'</div>';
+				pluginsList.appendChild(item);
+			});
+		}
+
+		function renderAvailablePlugins(plugins) {
+			var grid = document.getElementById('pluginsGrid');
+			if (!grid) return;
+			if (!plugins || plugins.length === 0) {
+				grid.innerHTML = '<div class="marketplace-loading">No plugins found.</div>';
+				return;
+			}
+			var html = '';
+			plugins.forEach(function(plugin) {
+				var name = plugin.name || 'Unknown';
+				var displayName = formatPluginName(name);
+				var desc = escapeHtml(plugin.description || 'No description');
+				var verified = plugin.verified;
+				var safeId = escapeHtml(plugin.installId || name).replace(/'/g, '&#39;');
+
+				html += '<div class="marketplace-item" data-plugin-id="' + safeId + '" onclick="showPluginDetail(this.dataset.pluginId)">' +
+					'<div class="marketplace-item-header">' +
+					'<div class="marketplace-item-icon-placeholder">' + escapeHtml(displayName.charAt(0).toUpperCase()) + '</div>' +
+					'<div class="marketplace-item-info">' +
+					'<div class="marketplace-item-name">' + escapeHtml(displayName) + '</div>' +
+					'</div>' +
+					'</div>' +
+					'<div class="marketplace-item-desc">' + desc + '</div>' +
+					'</div>';
+			});
+			grid.innerHTML = html;
+		}
+
+		function searchPlugins(query) {
+			if (!query) {
+				renderAvailablePlugins(topPlugins);
+				return;
+			}
+			var q = query.toLowerCase();
+			var filtered = topPlugins.filter(function(p) {
+				return (p.name && p.name.toLowerCase().indexOf(q) >= 0) ||
+					(p.description && p.description.toLowerCase().indexOf(q) >= 0);
+			});
+			renderAvailablePlugins(filtered);
+		}
+
+		function showPluginDetail(installId) {
+			var plugin = topPlugins.find(function(p) { return p.installId === installId; });
+			if (!plugin) return;
+
+			var name = plugin.name || 'Unknown';
+			var displayName = formatPluginName(name);
+			var desc = plugin.description || 'No description available.';
+			var verified = plugin.verified;
+			var verifiedHtml = verified ? '<span class="marketplace-item-verified" title="Anthropic verified">&#10003; Anthropic verified</span>' : '';
+
+			var grid = document.getElementById('pluginsGrid');
+			pluginsDisplayedList = grid.innerHTML;
+
+			grid.innerHTML = '<div class="marketplace-detail">' +
+				'<button class="marketplace-back-btn" onclick="backToPluginsList()">&#8592; Back</button>' +
+				'<div class="marketplace-detail-header">' +
+				'<div class="marketplace-item-icon-placeholder" style="width:40px;height:40px;font-size:18px;">' + escapeHtml(displayName.charAt(0).toUpperCase()) + '</div>' +
+				'<div class="marketplace-detail-header-info">' +
+				'<div class="marketplace-detail-name">' + escapeHtml(displayName) + '</div>' +
+				'<div class="marketplace-detail-header-meta">' + verifiedHtml + '</div>' +
+				'</div>' +
+				'<button class="btn marketplace-install-btn" data-plugin="' + escapeHtml(installId) + '" onclick="installPlugin(this.dataset.plugin)">Enable</button>' +
+				'</div>' +
+				'<div class="marketplace-detail-desc">' + escapeHtml(desc) + '</div>' +
+				'<div class="marketplace-detail-row"><a href="https://github.com/anthropics/claude-plugins-official/tree/main/' + (plugin.type === 'official' ? 'plugins' : 'external_plugins') + '/' + escapeHtml(name) + '" target="_blank" class="marketplace-detail-link">View on GitHub</a></div>' +
+				'<div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-top:4px;">Adds <code style="font-size:10px;">' + escapeHtml(installId) + '</code> to .claude/settings.json</div>' +
+				'</div>';
+		}
+
+		function backToPluginsList() {
+			var grid = document.getElementById('pluginsGrid');
+			if (pluginsDisplayedList) {
+				grid.innerHTML = pluginsDisplayedList;
+			} else {
+				renderAvailablePlugins(topPlugins);
+			}
+		}
+
+		function installPlugin(installId) {
+			sendStats('Plugin installed', { plugin: installId });
+			vscode.postMessage({ type: 'installPlugin', installId: installId });
+			hidePluginsModal();
+		}
+
+		function removePlugin(installId) {
+			sendStats('Plugin removed', { plugin: installId });
+			vscode.postMessage({ type: 'removePlugin', installId: installId });
+		}
+
+	
