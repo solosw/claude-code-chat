@@ -2450,6 +2450,7 @@ const styles = `
         border: 1px solid var(--vscode-input-border);
         border-radius: 6px;
         overflow: visible;
+        position: relative;
     }
 
     .image-preview-container {
@@ -2501,7 +2502,202 @@ const styles = `
         border-color: var(--vscode-focusBorder);
     }
 
-    .input-field {
+    
+    /* Command autocomplete dropdown */
+    .command-autocomplete {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 320px;
+        max-height: 220px;
+        overflow-y: auto;
+        background-color: var(--vscode-editorSuggestWidget-background);
+        border: 1px solid var(--vscode-editorSuggestWidget-border);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        z-index: 2147483647;
+        margin: 0;
+        display: none;
+    }
+
+    .autocomplete-item {
+        display: flex;
+        align-items: center;
+        padding: 6px 12px;
+        cursor: pointer;
+        gap: 8px;
+        border-bottom: 1px solid var(--vscode-editorSuggestWidget-border, rgba(255,255,255,0.06));
+    }
+
+    .autocomplete-item:last-child {
+        border-bottom: none;
+    }
+
+    .autocomplete-item.selected,
+    .autocomplete-item:hover {
+        background-color: var(--vscode-editorSuggestWidget-selectedBackground);
+        color: var(--vscode-editorSuggestWidget-selectedForeground);
+    }
+
+    .autocomplete-item-action {
+        border-top: 1px solid var(--vscode-editorSuggestWidget-border, rgba(255,255,255,0.08));
+        margin-top: 2px;
+    }
+
+    .autocomplete-item-action .autocomplete-title {
+        color: var(--vscode-charts-green, var(--vscode-editorSuggestWidget-highlightForeground, var(--vscode-foreground)));
+    }
+
+    .autocomplete-item-action .autocomplete-desc {
+        color: var(--vscode-descriptionForeground);
+    }
+
+    .autocomplete-item-action.selected,
+    .autocomplete-item-action:hover {
+        background-color: rgba(0, 200, 83, 0.12);
+    }
+
+    .autocomplete-item-action.selected .autocomplete-title,
+    .autocomplete-item-action:hover .autocomplete-title {
+        color: var(--vscode-foreground);
+    }
+
+    .autocomplete-item-action.selected .autocomplete-desc,
+    .autocomplete-item-action:hover .autocomplete-desc {
+        color: var(--vscode-editorSuggestWidget-selectedForeground);
+    }
+
+    .autocomplete-item-action.add-snippet-item {
+        border-left: none;
+        border-style: solid;
+        background-color: transparent;
+    }
+
+    .autocomplete-item-action.add-snippet-item:hover {
+        border-style: solid;
+    }
+
+    .autocomplete-item-action .autocomplete-icon {
+        font-size: 13px;
+    }
+
+    .autocomplete-item-action .autocomplete-title {
+        min-width: 140px;
+    }
+
+    .autocomplete-item-action .autocomplete-desc {
+        white-space: normal;
+    }
+
+    .autocomplete-item-action .autocomplete-title,
+    .autocomplete-item-action .autocomplete-desc {
+        pointer-events: none;
+    }
+
+    .autocomplete-item-action .autocomplete-icon {
+        pointer-events: none;
+    }
+
+    .autocomplete-item-action {
+        pointer-events: auto;
+    }
+
+    .autocomplete-item-action > * {
+        pointer-events: none;
+    }
+
+    .autocomplete-item-action.autocomplete-item.selected {
+        color: var(--vscode-foreground);
+    }
+
+    .autocomplete-item-action.autocomplete-item:hover {
+        color: var(--vscode-foreground);
+    }
+
+    .autocomplete-item-action.autocomplete-item.selected .autocomplete-desc,
+    .autocomplete-item-action.autocomplete-item:hover .autocomplete-desc {
+        color: var(--vscode-foreground);
+        opacity: 0.9;
+    }
+
+    .autocomplete-item-action.autocomplete-item.selected .autocomplete-title,
+    .autocomplete-item-action.autocomplete-item:hover .autocomplete-title {
+        color: var(--vscode-foreground);
+    }
+
+    .autocomplete-item-action.autocomplete-item.selected .autocomplete-icon,
+    .autocomplete-item-action.autocomplete-item:hover .autocomplete-icon {
+        color: inherit;
+    }
+
+    .autocomplete-item-action.autocomplete-item {
+        cursor: pointer;
+    }
+
+    .autocomplete-item-action.autocomplete-item .autocomplete-icon,
+    .autocomplete-item-action.autocomplete-item .autocomplete-title,
+    .autocomplete-item-action.autocomplete-item .autocomplete-desc {
+        user-select: none;
+    }
+
+    .autocomplete-item-action.autocomplete-item .autocomplete-desc {
+        opacity: 0.85;
+    }
+
+    .autocomplete-item-action.autocomplete-item.selected .autocomplete-desc,
+    .autocomplete-item-action.autocomplete-item:hover .autocomplete-desc {
+        opacity: 1;
+    }
+
+    .autocomplete-item-action.autocomplete-item .autocomplete-title {
+        font-weight: 600;
+    }
+
+    .autocomplete-item-action.autocomplete-item .autocomplete-desc {
+        font-size: 11px;
+    }
+
+    .autocomplete-item-action.autocomplete-item {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
+
+    .autocomplete-item-action.autocomplete-item:last-child {
+        border-bottom: none;
+    }
+
+    .autocomplete-item-action.autocomplete-item::before {
+        content: '';
+        display: block;
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+    }
+
+    .autocomplete-icon {
+        flex-shrink: 0;
+        width: 20px;
+        text-align: center;
+        font-size: 14px;
+    }
+
+    .autocomplete-title {
+        flex-shrink: 0;
+        font-weight: 600;
+        font-size: 13px;
+        min-width: 100px;
+        color: var(--vscode-editorSuggestWidget-highlightForeground, var(--vscode-foreground));
+    }
+
+    .autocomplete-desc {
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground, rgba(255,255,255,0.5));
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+.input-field {
         width: 100%;
         box-sizing: border-box;
         background-color: transparent;
@@ -3975,6 +4171,18 @@ const styles = `
         color: var(--vscode-descriptionForeground);
         text-align: center;
         opacity: 0.9;
+    }
+
+    .native-commands-hint {
+        margin: 8px 20px 12px 20px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--vscode-descriptionForeground);
+        background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+        border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.18));
+        display: none;
     }
 
     .prompt-snippet-item {

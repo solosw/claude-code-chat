@@ -8,6 +8,7 @@ import topPlugins from './top-plugins.json'
 import getSkillsHtml from './skills-ui'
 import getPluginsHtml from './plugins-ui'
 
+const serializeForInlineScript = (value: unknown) => JSON.stringify(value).replace(/<\//g, '<\\/');
 
 const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https://ccc.api.opencredits.ai', opencreditsWebUrl: string = 'https://ccc.opencredits.ai', opencreditsPublishableKey: string = 'oc_pk_c43da4f9a9484ae484ad29bc97cc354f', editorName: string = 'unknown') => `<!DOCTYPE html>
 <html lang="en">
@@ -925,7 +926,7 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 							</div>
 						</div>
 						<div class="form-group">
-							<label for="snippetPrompt">Prompt Text:</label>
+							<label for="snippetPrompt">Prompt Text (optional):</label>
 							<textarea id="snippetPrompt" placeholder="e.g., Help me fix this bug in my code..." rows="3"></textarea>
 						</div>
 						<div class="form-buttons">
@@ -1001,167 +1002,6 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 					<p>These commands require the Claude CLI and will open in VS Code terminal. Return here after completion.</p>
 				</div>
 				<div class="slash-commands-list" id="nativeCommandsList">
-				<div class="slash-command-item" onclick="executeSlashCommand('add-dir')">
-					<div class="slash-command-icon">📁</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/add-dir</div>
-						<div class="slash-command-description">Add additional working directories</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('agents')">
-					<div class="slash-command-icon">🤖</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/agents</div>
-						<div class="slash-command-description">Manage custom AI subagents for specialized tasks</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('bug')">
-					<div class="slash-command-icon">🐛</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/bug</div>
-						<div class="slash-command-description">Report bugs (sends conversation to Anthropic)</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('clear')">
-					<div class="slash-command-icon">🗑️</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/clear</div>
-						<div class="slash-command-description">Clear conversation history</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('compact')">
-					<div class="slash-command-icon">📦</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/compact</div>
-						<div class="slash-command-description">Compact conversation with optional focus instructions</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('config')">
-					<div class="slash-command-icon">⚙️</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/config</div>
-						<div class="slash-command-description">Open the Settings interface (Config tab)</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('cost')">
-					<div class="slash-command-icon">💰</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/cost</div>
-						<div class="slash-command-description">Show token usage statistics (see cost tracking guide for subscription-specific details)</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('doctor')">
-					<div class="slash-command-icon">🩺</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/doctor</div>
-						<div class="slash-command-description">Checks the health of your Claude Code installation</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('help')">
-					<div class="slash-command-icon">❓</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/help</div>
-						<div class="slash-command-description">Get usage help</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('init')">
-					<div class="slash-command-icon">🚀</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/init</div>
-						<div class="slash-command-description">Initialize project with CLAUDE.md guide</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('login')">
-					<div class="slash-command-icon">🔑</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/login</div>
-						<div class="slash-command-description">Switch Anthropic accounts</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('logout')">
-					<div class="slash-command-icon">🚪</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/logout</div>
-						<div class="slash-command-description">Sign out from your Anthropic account</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('mcp')">
-					<div class="slash-command-icon">🔌</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/mcp</div>
-						<div class="slash-command-description">Manage MCP server connections and OAuth authentication</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('memory')">
-					<div class="slash-command-icon">🧠</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/memory</div>
-						<div class="slash-command-description">Edit CLAUDE.md memory files</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('model')">
-					<div class="slash-command-icon">🤖</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/model</div>
-						<div class="slash-command-description">Select or change the AI model</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('permissions')">
-					<div class="slash-command-icon">🔒</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/permissions</div>
-						<div class="slash-command-description">View or update permissions</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('pr_comments')">
-					<div class="slash-command-icon">💬</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/pr_comments</div>
-						<div class="slash-command-description">View pull request comments</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('review')">
-					<div class="slash-command-icon">👀</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/review</div>
-						<div class="slash-command-description">Request code review</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('rewind')">
-					<div class="slash-command-icon">⏪</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/rewind</div>
-						<div class="slash-command-description">Rewind the conversation and/or code</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('status')">
-					<div class="slash-command-icon">📊</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/status</div>
-						<div class="slash-command-description">Open the Settings interface (Status tab) showing version, model, account, and connectivity</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('terminal-setup')">
-					<div class="slash-command-icon">⌨️</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/terminal-setup</div>
-						<div class="slash-command-description">Install Shift+Enter key binding for newlines (iTerm2 and VSCode only)</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('usage')">
-					<div class="slash-command-icon">📈</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/usage</div>
-						<div class="slash-command-description">Show plan usage limits and rate limit status (subscription plans only)</div>
-					</div>
-				</div>
-				<div class="slash-command-item" onclick="executeSlashCommand('vim')">
-					<div class="slash-command-icon">📝</div>
-					<div class="slash-command-content">
-						<div class="slash-command-title">/vim</div>
-						<div class="slash-command-description">Enter vim mode for alternating insert and command modes</div>
-					</div>
-				</div>
 				<div class="slash-command-item custom-command-item">
 					<div class="slash-command-icon">⚡</div>
 					<div class="slash-command-content">
@@ -1183,8 +1023,9 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 			</div>
 		</div>
 	</div>
+	</div>
 
-	<script>window.__recommendedModels = ${JSON.stringify(recommendedModels)};window.__topMcpServers = ${JSON.stringify(topMcpServers)};window.__topSkills = ${JSON.stringify(topSkills)};window.__topPlugins = ${JSON.stringify(topPlugins)};</script>
+	<script>window.__recommendedModels = ${serializeForInlineScript(recommendedModels)};window.__topMcpServers = ${serializeForInlineScript(topMcpServers)};window.__topSkills = ${serializeForInlineScript(topSkills)};window.__topPlugins = ${serializeForInlineScript(topPlugins)};</script>
 	${getScript(isTelemetryEnabled, opencreditsApiUrl, opencreditsWebUrl, opencreditsPublishableKey)}
 	
 	<!--
@@ -1197,6 +1038,7 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 	No, Umami does not use any cookies in the tracking code.
 	-->
 	${isTelemetryEnabled ? '<script defer src="https://product.opencredits.ai/script.js" data-website-id="0159e9b1-4a98-4b49-943a-32db3e743b95" data-tag="' + editorName + '"></script>' : '<!-- Analytics disabled due to VS Code telemetry settings -->'}
+	<div id="commandAutocomplete" class="command-autocomplete" style="display: none;"></div>
 </body>
 </html>`;
 

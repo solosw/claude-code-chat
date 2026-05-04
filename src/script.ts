@@ -1744,6 +1744,9 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		});
 		
 		messageInput.addEventListener('keydown', (e) => {
+			if (autocompleteVisible && e.key === 'Enter' && !e.shiftKey) {
+				return;
+			}
 			if (e.key === 'Enter' && !e.shiftKey) {
 				e.preventDefault();
 				const sendBtn = document.getElementById('sendBtn');
@@ -3342,13 +3345,76 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		// Slash commands modal functions
-		function showSlashCommandsModal() {
-			document.getElementById('slashCommandsModal').style.display = 'flex';
-			// Auto-focus the search input
+		function showSlashCommandsModal(searchTerm = '') {
+			const modal = document.getElementById('slashCommandsModal');
+			const searchInput = document.getElementById('slashCommandsSearch');
+			modal.style.display = 'flex';
 			setTimeout(() => {
-				document.getElementById('slashCommandsSearch').focus();
+				searchInput.value = searchTerm;
+				searchInput.focus();
+				filterSlashCommands();
 			}, 100);
 		}
+
+		function openSlashCommandsFromInput(rawFilter = '') {
+			const normalized = String(rawFilter || '').trim().toLowerCase();
+			showSlashCommandsModal(normalized);
+		}
+
+		function isSlashTriggerText(text) {
+			const value = String(text || '');
+			if (!value.startsWith('/')) {
+				return false;
+			}
+			return value.indexOf(' ') === -1;
+		}
+
+		function getSlashTriggerFilter(text) {
+			const value = String(text || '').trim();
+			return value.startsWith('/') ? value.slice(1) : '';
+		}
+
+		function isSlashModalOpen() {
+			const modal = document.getElementById('slashCommandsModal');
+			return !!modal && modal.style.display === 'flex';
+		}
+
+		function closeSlashAutocompleteFlow() {
+			hideCommandAutocomplete();
+			if (isSlashModalOpen()) {
+				hideSlashCommandsModal();
+			}
+		}
+
+		function handleSlashTriggerInput() {
+			const value = messageInput.value;
+			if (isSlashTriggerText(value)) {
+				openSlashCommandsFromInput(getSlashTriggerFilter(value));
+			} else if (isSlashModalOpen()) {
+				hideSlashCommandsModal();
+			}
+		}
+
+		messageInput.addEventListener('input', handleSlashTriggerInput);
+
+		messageInput.addEventListener('keydown', (e) => {
+			if (!isSlashModalOpen()) {
+				return;
+			}
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				hideSlashCommandsModal();
+				messageInput.focus();
+			}
+		});
+
+		document.getElementById('slashCommandsSearch').addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				hideSlashCommandsModal();
+				messageInput.focus();
+			}
+		});
 
 		function hideSlashCommandsModal() {
 			document.getElementById('slashCommandsModal').style.display = 'none';
@@ -3627,25 +3693,23 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			toggleSettings();
 		}
 
-		function executeSlashCommand(command) {
-			// Hide the modal
-			hideSlashCommandsModal();
-
-			// Clear the input since user selected a command
-			messageInput.value = '';
-
-			// Send command to VS Code to execute
-			vscode.postMessage({
-				type: 'executeSlashCommand',
-				command: command
-			});
-
-			// Show user feedback - /compact runs in chat, others in terminal
-			if (command === 'compact') {
-				// No message needed - compact runs in chat and shows its own status
-			} else {
-				addMessage('user', \`Executing /\${command} command in terminal. Check the terminal output and return when ready.\`, 'assistant');
+		function insertSlashCommandIntoInput(command) {
+			const normalizedCommand = String(command || '').trim().replace(new RegExp('^/+'), '');
+			if (!normalizedCommand) {
+				return;
 			}
+
+			const commandText = '/' + normalizedCommand + ' ';
+			messageInput.value = commandText;
+			messageInput.focus();
+			messageInput.setSelectionRange(commandText.length, commandText.length);
+			messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+
+		function executeSlashCommand(command) {
+			hideSlashCommandsModal();
+			hideCommandAutocomplete();
+			insertSlashCommandIntoInput(command);
 		}
 
 		function handleCustomCommandKeydown(event) {
@@ -3653,8 +3717,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				event.preventDefault();
 				const customCommand = event.target.value.trim();
 				if (customCommand) {
-					executeSlashCommand(customCommand);
-					// Clear the input for next use
+					insertSlashCommandIntoInput(customCommand);
+					hideSlashCommandsModal();
 					event.target.value = '';
 				}
 			}
@@ -3712,8 +3776,8 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const name = document.getElementById('snippetName').value.trim();
 			const prompt = document.getElementById('snippetPrompt').value.trim();
 			
-			if (!name || !prompt) {
-				alert('Please fill in both name and prompt text.');
+			if (!name) {
+				alert('Please fill in the command name.');
 				return;
 			}
 			
@@ -3737,6 +3801,15 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		function loadCustomSnippets(snippetsData = {}) {
+			// Also update customCommands for autocomplete
+			customCommands = Object.values(snippetsData).map(function(snippet) {
+				return {
+					id: snippet.id,
+					icon: '\u{1F4DD}',
+					title: '/' + snippet.name,
+					description: snippet.prompt || 'Custom command'
+				};
+			});
 			const snippetsList = document.getElementById('promptSnippetsList');
 			
 			// Remove existing custom snippets
@@ -3749,13 +3822,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			Object.values(snippetsData).forEach(snippet => {
 				const snippetElement = document.createElement('div');
 				snippetElement.className = 'slash-command-item prompt-snippet-item custom-snippet-item';
-				snippetElement.onclick = () => usePromptSnippet(snippet.id);
+				snippetElement.onclick = () => executeSlashCommand(snippet.name);
 				
 				snippetElement.innerHTML = \`
 					<div class="slash-command-icon">📝</div>
 					<div class="slash-command-content">
 						<div class="slash-command-title">/\${snippet.name}</div>
-						<div class="slash-command-description">\${snippet.prompt}</div>
+						<div class="slash-command-description">\${snippet.prompt || 'Custom command'}</div>
 					</div>
 					<div class="snippet-actions">
 						<button class="snippet-delete-btn" onclick="event.stopPropagation(); deleteCustomSnippet('\${snippet.id}')" title="Delete snippet">🗑️</button>
@@ -3772,6 +3845,23 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				type: 'deleteCustomSnippet',
 				snippetId: snippetId
 			});
+		}
+
+
+		function renderNativeCommandsInModal(commands) {
+			var container = document.getElementById('nativeCommandsList');
+			if (!container) return;
+			container.innerHTML = commands.map(function(cmd) {
+				var commandTitle = String(cmd.title || '');
+				var commandText = commandTitle.startsWith('/') ? commandTitle.slice(1) : commandTitle;
+				return '<div class="slash-command-item" data-cmd-id="' + cmd.id + '" data-command="' + commandText + '" onclick="executeSlashCommand(this.dataset.command || this.dataset.cmdId)">' +
+					'<div class="slash-command-icon">' + cmd.icon + '</div>' +
+					'<div class="slash-command-content">' +
+						'<div class="slash-command-title">' + cmd.title + '</div>' +
+						'<div class="slash-command-description">' + cmd.description + '</div>' +
+					'</div>' +
+				'</div>';
+			}).join('');
 		}
 
 		function filterSlashCommands() {
@@ -5930,17 +6020,331 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			});
 		}
 
-		// Request custom snippets from VS Code on page load
-		vscode.postMessage({
-			type: 'getCustomSnippets'
+		// --- Inline command autocomplete ---
+		let builtinCommands = [];
+		let customCommands = [];
+		let nativeCommandsMayBeIncomplete = false;
+		let nativeCommandsSource = 'static';
+		let autocompleteSelectedIndex = -1;
+		let autocompleteVisible = false;
+
+		function getNativeCommandHintText() {
+			if (!nativeCommandsMayBeIncomplete) {
+				return '';
+			}
+			if (nativeCommandsSource === 'cache') {
+				return 'Using cached commands. List may be incomplete until Claude refreshes.';
+			}
+			return 'Commands may be incomplete until Claude starts and refreshes.';
+		}
+
+		function updateNativeCommandsHint() {
+			const hintElements = document.querySelectorAll('.native-commands-hint');
+			const hintText = getNativeCommandHintText();
+			hintElements.forEach((element) => {
+				element.textContent = hintText;
+				element.style.display = hintText ? 'block' : 'none';
+			});
+		}
+
+		function ensureNativeCommandsHint() {
+			const list = document.getElementById('nativeCommandsList');
+			if (!list) return;
+			const section = list.closest('.slash-commands-section');
+			if (!section) return;
+			let hint = section.querySelector('.native-commands-hint');
+			if (!hint) {
+				hint = document.createElement('div');
+				hint.className = 'native-commands-hint';
+				const info = section.querySelector('.slash-commands-info');
+				if (info) {
+					info.insertAdjacentElement('afterend', hint);
+				} else {
+					section.insertBefore(hint, list);
+				}
+			}
+			updateNativeCommandsHint();
+		}
+
+		function requestNativeCommands() {
+			vscode.postMessage({
+				type: 'getNativeCommands'
+			});
+		}
+
+		function requestCustomSnippets() {
+			vscode.postMessage({
+				type: 'getCustomSnippets'
+			});
+		}
+
+		ensureNativeCommandsHint();
+		requestNativeCommands();
+		requestCustomSnippets();
+
+		window.addEventListener('focus', () => {
+			requestNativeCommands();
 		});
 
-		// Detect slash commands input
+		function getAllCommands() {
+			return [...builtinCommands, ...customCommands];
+		}
+
+		function openInlineCustomCommandCreator() {
+			hideCommandAutocomplete();
+			showSlashCommandsModal();
+			showAddSnippetForm();
+		}
+
+		function getAutocompleteEntries(filter) {
+			const commandEntries = getAllCommands().filter((cmd) => {
+				if (!filter) {
+					return true;
+				}
+				const normalizedFilter = filter.toLowerCase();
+				const commandTitle = String(cmd.title || '');
+				const commandName = (commandTitle.startsWith('/') ? commandTitle.slice(1) : commandTitle).toLowerCase();
+				const description = String(cmd.description || '').toLowerCase();
+				return commandName.startsWith(normalizedFilter) || description.includes(normalizedFilter);
+			}).map((cmd, index) => {
+				const commandTitle = String(cmd.title || '');
+				const commandText = commandTitle.startsWith('/') ? commandTitle.slice(1) : commandTitle;
+				return {
+					type: 'command',
+					index,
+					id: cmd.id,
+					commandText,
+					icon: cmd.icon,
+					title: cmd.title,
+					description: cmd.description,
+				};
+			});
+
+			commandEntries.push({
+				type: 'action',
+				index: commandEntries.length,
+				id: '__add_custom_command__',
+				commandText: '',
+				icon: '➕',
+				title: 'Add Custom Command',
+				description: 'Create and persist your own slash command',
+			});
+
+			if (commandEntries.length === 1 && commandEntries[0].id === '__add_custom_command__' && filter) {
+				commandEntries[0].description = 'No matching commands. Create and persist /' + filter;
+			}
+
+			return commandEntries;
+		}
+
+		function handleAutocompleteSelection(selectionId, selectionCommandText) {
+			if (selectionId === '__add_custom_command__') {
+				openInlineCustomCommandCreator();
+				return;
+			}
+			selectCommand(selectionCommandText || selectionId);
+		}
+
+		function renderAutocompleteEntries(entries) {
+			return entries.map((entry) => {
+				const extraClass = entry.type === 'action' ? ' autocomplete-item-action add-snippet-item' : '';
+				return '<div class="autocomplete-item' + extraClass + '" data-index="' + entry.index + '" data-id="' + entry.id + '" data-command="' + (entry.commandText || '') + '">' +
+					'<span class="autocomplete-icon">' + entry.icon + '</span>' +
+					'<span class="autocomplete-title">' + entry.title + '</span>' +
+					'<span class="autocomplete-desc">' + entry.description + '</span>' +
+				'</div>';
+			}).join('');
+		}
+
+		function getVisibleAutocompleteItems() {
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (!dropdown) return [];
+			return Array.from(dropdown.querySelectorAll('.autocomplete-item'));
+		}
+
+		function highlightAutocompleteItem(index) {
+			const items = getVisibleAutocompleteItems();
+			items.forEach((item, i) => item.classList.toggle('selected', i === index));
+			autocompleteSelectedIndex = index;
+			if (items[index]) {
+				items[index].scrollIntoView({ block: 'nearest' });
+			}
+		}
+
+		function triggerSelectedAutocompleteItem() {
+			const items = getVisibleAutocompleteItems();
+			const selected = items[autocompleteSelectedIndex];
+			if (!selected) {
+				return;
+			}
+			handleAutocompleteSelection(selected.getAttribute('data-id'), selected.getAttribute('data-command'));
+		}
+
+		function showCommandAutocomplete(filter) {
+			const dropdown = ensureCommandAutocompleteInBody();
+			if (!dropdown) return;
+			const entries = getAutocompleteEntries(filter);
+			if (entries.length === 0) {
+				hideCommandAutocomplete();
+				return;
+			}
+			autocompleteSelectedIndex = -1;
+			autocompleteVisible = true;
+			dropdown.innerHTML = renderAutocompleteEntries(entries);
+			dropdown.style.display = 'block';
+			positionCommandAutocomplete(dropdown);
+			dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+				item.addEventListener('click', () => handleAutocompleteSelection(item.getAttribute('data-id'), item.getAttribute('data-command')));
+				item.addEventListener('mouseenter', () => highlightAutocompleteItem(parseInt(item.getAttribute('data-index'))));
+			});
+		}
+
+		function hideCommandAutocomplete() {
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (dropdown) {
+				dropdown.style.display = 'none';
+				dropdown.style.top = '';
+				dropdown.innerHTML = '';
+			}
+			autocompleteVisible = false;
+			autocompleteSelectedIndex = -1;
+		}
+
+		function selectCommand(commandId) {
+			hideCommandAutocomplete();
+			insertSlashCommandIntoInput(commandId);
+		}
+
+		function positionCommandAutocomplete(dropdown) {
+			if (!dropdown) return;
+			const inputRect = messageInput.getBoundingClientRect();
+			const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+			const gap = 8;
+			const minVisibleHeight = 120;
+			const maxPanelHeight = 220;
+			const spaceAbove = Math.max(0, inputRect.top - gap);
+			const spaceBelow = Math.max(0, viewportHeight - inputRect.bottom - gap);
+			const idealPanelHeight = Math.min(dropdown.scrollHeight || maxPanelHeight, maxPanelHeight);
+			const showAbove = spaceAbove >= idealPanelHeight || spaceAbove > spaceBelow;
+			const availableHeight = showAbove ? spaceAbove : spaceBelow;
+			const computedHeight = Math.max(Math.min(availableHeight, idealPanelHeight), Math.min(minVisibleHeight, availableHeight || minVisibleHeight));
+			const top = showAbove
+				? Math.max(gap, inputRect.top - computedHeight - gap)
+				: Math.min(viewportHeight - computedHeight - gap, inputRect.bottom + gap);
+			dropdown.style.maxHeight = computedHeight + 'px';
+			dropdown.style.top = top + 'px';
+			dropdown.style.left = inputRect.left + 'px';
+			dropdown.style.width = inputRect.width + 'px';
+		}
+
+		function shouldKeepAutocompleteOpen(nextFocusedElement) {
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (!dropdown) {
+				return false;
+			}
+			return nextFocusedElement === messageInput || dropdown.contains(nextFocusedElement);
+		}
+
+		function scheduleAutocompleteBlurCheck() {
+			window.setTimeout(() => {
+				if (!autocompleteVisible) {
+					return;
+				}
+				if (!shouldKeepAutocompleteOpen(document.activeElement)) {
+					hideCommandAutocomplete();
+				}
+			}, 0);
+		}
+
+		messageInput.addEventListener('blur', scheduleAutocompleteBlurCheck);
+
+		const commandAutocompleteElement = document.getElementById('commandAutocomplete');
+		if (commandAutocompleteElement) {
+			commandAutocompleteElement.addEventListener('mousedown', (event) => {
+				event.preventDefault();
+			});
+		}
+
+		window.addEventListener('focusin', (event) => {
+			if (!autocompleteVisible) {
+				return;
+			}
+			if (!shouldKeepAutocompleteOpen(event.target)) {
+				hideCommandAutocomplete();
+			}
+		});
+
+		window.addEventListener('pointerdown', (event) => {
+			if (!autocompleteVisible) {
+				return;
+			}
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (dropdown && !dropdown.contains(event.target) && !messageInput.contains(event.target)) {
+				hideCommandAutocomplete();
+			}
+		}, true);
+
+		function repositionCommandAutocomplete() {
+			if (!autocompleteVisible) return;
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (dropdown) {
+				positionCommandAutocomplete(dropdown);
+			}
+		}
+
+		function ensureCommandAutocompleteInBody() {
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (dropdown && dropdown.parentElement !== document.body) {
+				document.body.appendChild(dropdown);
+			}
+			return dropdown;
+		}
+
+		// Detect slash commands input - open modal directly
 		messageInput.addEventListener('input', (e) => {
 			const value = messageInput.value;
-			// Only trigger when "/" is the very first and only character
-			if (value === '/') {
-				showSlashCommandsModal();
+			const cursorPos = messageInput.selectionStart;
+			const textBeforeCursor = value.substring(0, cursorPos);
+			const slashMatch = textBeforeCursor.match(new RegExp('\\/([a-z_-]*)$'));
+			if (slashMatch && textBeforeCursor.indexOf('/') === textBeforeCursor.lastIndexOf('/')) {
+				const filter = slashMatch[1];
+				openSlashCommandsFromInput(filter);
+				return;
+			}
+			if (value === '' && isSlashModalOpen()) {
+				hideSlashCommandsModal();
+			}
+		});
+
+		// Keyboard navigation for autocomplete
+		messageInput.addEventListener('keydown', (e) => {
+			if (isSlashModalOpen()) {
+				if (e.key === 'Escape') {
+					e.preventDefault();
+					hideSlashCommandsModal();
+					messageInput.focus();
+				}
+				return;
+			}
+		});
+
+		// Keep slash modal searchable from keyboard
+		document.getElementById('slashCommandsSearch').addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				hideSlashCommandsModal();
+				messageInput.focus();
+			}
+		});
+
+		window.addEventListener('resize', repositionCommandAutocomplete);
+		window.addEventListener('scroll', repositionCommandAutocomplete, true);
+
+		// Hide autocomplete when clicking outside
+		document.addEventListener('click', (e) => {
+			const dropdown = document.getElementById('commandAutocomplete');
+			if (autocompleteVisible && !messageInput.contains(e.target) && dropdown && !dropdown.contains(e.target)) {
+				hideCommandAutocomplete();
 			}
 		});
 
@@ -5949,7 +6353,19 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		window.addEventListener('message', event => {
 			const message = event.data;
 			
-			if (message.type === 'customSnippetsData') {
+			if (message.type === 'nativeCommandsData') {
+				const nativePayload = Array.isArray(message.data)
+					? { commands: message.data, isIncomplete: false, source: 'dynamic' }
+					: (message.data || { commands: [], isIncomplete: false, source: 'dynamic' });
+				nativeCommandsMayBeIncomplete = !!nativePayload.isIncomplete;
+				nativeCommandsSource = nativePayload.source || 'dynamic';
+				builtinCommands = Array.isArray(nativePayload.commands)
+					? nativePayload.commands.filter(cmd => cmd.id !== '__commands_incomplete')
+					: [];
+				updateNativeCommandsHint();
+				renderNativeCommandsInModal(builtinCommands);
+				ensureNativeCommandsHint();
+			} else if (message.type === 'customSnippetsData') {
 				// Update global custom snippets data
 				customSnippetsData = message.data || {};
 				// Refresh the snippets display

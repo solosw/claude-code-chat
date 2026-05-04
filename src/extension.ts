@@ -238,6 +238,19 @@ interface OpenAIBridgeRuntimeState {
 	message?: string;
 }
 
+interface SlashCommandItem {
+	id: string;
+	icon: string;
+	title: string;
+	description: string;
+}
+
+interface NativeCommandsPayload {
+	commands: SlashCommandItem[];
+	isIncomplete: boolean;
+	source: 'dynamic' | 'cache' | 'static';
+}
+
 type LocalPermissionValue = true | string[];
 
 const DEFAULT_BASH_PATTERNS = ['rtk *'] as const;
@@ -366,7 +379,51 @@ class ClaudeChatProvider {
 	private _requestStartFileSnapshots: Map<string, RequestStartFileSnapshot> = new Map();
 	private _requestBaselineCommitSha: string | undefined;
 	private _requestFileWatcher: vscode.FileSystemWatcher | undefined;
+	private _dynamicSlashCommands: SlashCommandItem[] | undefined;
+	private _dynamicSlashCommandsDetectedAt: number | undefined;
+	private _hasDetectedSlashCommandsThisSession = false;
 	private static readonly MAX_TEXT_DETECTION_BYTES = 8192;
+	private static readonly DYNAMIC_SLASH_COMMANDS_CACHE_KEY = 'claude.dynamicSlashCommands';
+	private static readonly DYNAMIC_SLASH_COMMANDS_DETECTED_AT_CACHE_KEY = 'claude.dynamicSlashCommands.detectedAt';
+	private static readonly DYNAMIC_SLASH_COMMANDS_MAX_AGE_MS = 1000 * 60 * 60 * 24;
+	private static readonly DEFAULT_SLASH_COMMAND_ICONS: Record<string, string> = {
+		compact: '📦',
+		config: '⚙️',
+		help: '❓',
+		mcp: '🔌',
+		model: '🤖',
+		permissions: '🔒',
+		review: '👀',
+		status: '📊',
+		usage: '📈',
+		vim: '📝'
+	};
+	private static readonly DEFAULT_SLASH_COMMAND_DESCRIPTION = 'Command discovered from Claude Code runtime';
+	private static readonly DEFAULT_SLASH_COMMAND_INCOMPLETE_DESCRIPTION = 'Command available after Claude starts. Current list may be incomplete.';
+	private static readonly DEFAULT_SLASH_COMMAND_TITLE = 'Available commands';
+	private static readonly DEFAULT_SLASH_COMMANDS_FALLBACK_ICON = '⌘';
+	private static readonly DEFAULT_SLASH_COMMANDS_SOURCE: NativeCommandsPayload['source'] = 'static';
+	private static readonly DEFAULT_SLASH_COMMANDS_INCOMPLETE = true;
+	private static readonly DEFAULT_SLASH_COMMANDS_RUNTIME_SOURCE: NativeCommandsPayload['source'] = 'dynamic';
+	private static readonly DEFAULT_SLASH_COMMANDS_CACHE_SOURCE: NativeCommandsPayload['source'] = 'cache';
+	private static readonly DEFAULT_SLASH_COMMANDS_RUNTIME_READY_MARKER = 'ready';
+	private static readonly DEFAULT_SLASH_COMMANDS_DISCOVERY_TIMEOUT_MS = 8000;
+	private static readonly DEFAULT_SLASH_COMMANDS_DISCOVERY_PROMPT = '/help';
+	private static readonly DEFAULT_SLASH_COMMANDS_DISCOVERY_COMMAND = '/';
+	private static readonly DEFAULT_SLASH_COMMANDS_DISCOVERY_REGEX = /^\/(?<id>[a-z0-9:_-]+)\b/i;
+	private static readonly DEFAULT_SLASH_COMMANDS_SKIP_IDS = new Set(['']);
+	private static readonly DEFAULT_SLASH_COMMANDS_STATIC_REQUIRE_PATH = './slash-commands.json';
+	private static readonly DEFAULT_SLASH_COMMANDS_CUSTOM_SOURCE = 'custom';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_ID = '__commands_incomplete';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_ICON = 'ℹ️';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_TITLE = 'Commands may be incomplete';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION = 'Claude has not started yet. Dynamic slash commands will refresh automatically after startup.';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_TITLE_READY = 'Commands refreshed';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION_READY = 'Detected runtime slash commands from the current Claude session.';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_TITLE_CACHE = 'Using cached commands';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION_CACHE = 'Showing the last successfully detected slash commands until Claude refreshes them.';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_TITLE_STATIC = 'Using built-in commands';
+	private static readonly DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION_STATIC = 'Showing built-in commands until Claude becomes ready.';
 	private static readonly IGNORED_TRACKING_DIR_SEGMENTS = new Set([
 		'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'target', 'bin', 'obj', 'coverage', '.turbo', '.cache', 'out'
 	]);
@@ -389,6 +446,8 @@ class ClaudeChatProvider {
 
 		// Load cached subscription type (will be refreshed on first message)
 		this._subscriptionType = this._context.globalState.get('claude.subscriptionType');
+		this._dynamicSlashCommands = this._context.globalState.get<SlashCommandItem[]>(ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_CACHE_KEY);
+		this._dynamicSlashCommandsDetectedAt = this._context.globalState.get<number>(ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_DETECTED_AT_CACHE_KEY);
 
 		if (this._options.restoreLatestConversation) {
 			const latestConversation = this._getLatestConversation();
@@ -913,6 +972,9 @@ class ClaudeChatProvider {
 			type: 'ready',
 			data: this._isProcessing ? 'Claude is working...' : 'Ready to chat with Claude Code! Type your message below.'
 		});
+		void this._refreshDynamicSlashCommandsIfReady();
+		void this._sendNativeCommands();
+		void this._sendCustomSnippets();
 
 		// Send current model to webview
 		this._postMessage({
@@ -1238,6 +1300,9 @@ class ClaudeChatProvider {
 				return;
 			case 'deleteMCPServer':
 				this._deleteMCPServer(message.name, message.scope || 'project');
+				return;
+			case 'getNativeCommands':
+				this._sendNativeCommands();
 				return;
 			case 'getCustomSnippets':
 				this._sendCustomSnippets();
@@ -3649,6 +3714,174 @@ class ClaudeChatProvider {
 			console.error('Error deleting MCP server:', error);
 			this._postMessage({ type: 'mcpServerError', data: { error: 'Failed to delete MCP server' } });
 		}
+	}
+
+	private _readStaticSlashCommands(): SlashCommandItem[] {
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const slashCommands = require(ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_STATIC_REQUIRE_PATH) as SlashCommandItem[];
+			return Array.isArray(slashCommands) ? slashCommands : [];
+		} catch (error) {
+			console.error('Error loading static slash commands:', error);
+			return [];
+		}
+	}
+
+	private _normalizeSlashCommandId(value: string): string {
+		return String(value || '').trim().replace(/^\/+/, '').toLowerCase();
+	}
+
+	private _normalizeSlashCommandItem(item: Partial<SlashCommandItem>): SlashCommandItem | undefined {
+		const normalizedId = this._normalizeSlashCommandId(item.id || item.title || '');
+		if (!normalizedId || ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_SKIP_IDS.has(normalizedId)) {
+			return undefined;
+		}
+		return {
+			id: normalizedId,
+			icon: item.icon || ClaudeChatProvider.DEFAULT_SLASH_COMMAND_ICONS[normalizedId] || ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_FALLBACK_ICON,
+			title: item.title || '/' + normalizedId,
+			description: item.description || ClaudeChatProvider.DEFAULT_SLASH_COMMAND_DESCRIPTION,
+		};
+	}
+
+	private _mergeSlashCommands(...commandGroups: Array<SlashCommandItem[] | undefined>): SlashCommandItem[] {
+		const merged = new Map<string, SlashCommandItem>();
+		for (const group of commandGroups) {
+			for (const command of group || []) {
+				const normalized = this._normalizeSlashCommandItem(command);
+				if (!normalized || merged.has(normalized.id)) {
+					continue;
+				}
+				merged.set(normalized.id, normalized);
+			}
+		}
+		return Array.from(merged.values());
+	}
+
+	private _getCachedSlashCommands(): SlashCommandItem[] | undefined {
+		if (!this._dynamicSlashCommands || !this._dynamicSlashCommandsDetectedAt) {
+			return undefined;
+		}
+		if (Date.now() - this._dynamicSlashCommandsDetectedAt > ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_MAX_AGE_MS) {
+			return undefined;
+		}
+		return this._dynamicSlashCommands;
+	}
+
+	private async _cacheDynamicSlashCommands(commands: SlashCommandItem[]): Promise<void> {
+		this._dynamicSlashCommands = commands;
+		this._dynamicSlashCommandsDetectedAt = Date.now();
+		await this._context.globalState.update(ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_CACHE_KEY, commands);
+		await this._context.globalState.update(ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_DETECTED_AT_CACHE_KEY, this._dynamicSlashCommandsDetectedAt);
+	}
+
+	private _buildNativeCommandsPayload(commands: SlashCommandItem[], source: NativeCommandsPayload['source'], isIncomplete: boolean): NativeCommandsPayload {
+		const infoItem = this._normalizeSlashCommandItem({
+			id: ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_ID,
+			icon: ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_ICON,
+			title: source === ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_RUNTIME_SOURCE
+				? ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_TITLE_READY
+				: source === ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_CACHE_SOURCE
+					? ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_TITLE_CACHE
+					: ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_TITLE_STATIC,
+			description: source === ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_RUNTIME_SOURCE
+				? ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION_READY
+				: source === ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_CACHE_SOURCE
+					? ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION_CACHE
+					: ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_HINT_DESCRIPTION_STATIC,
+		});
+		const payloadCommands = isIncomplete && infoItem ? [infoItem, ...commands] : commands;
+		return {
+			commands: payloadCommands,
+			isIncomplete,
+			source,
+		};
+	}
+
+	private async _getNativeCommandsPayload(): Promise<NativeCommandsPayload> {
+		const staticCommands = this._readStaticSlashCommands();
+		if (this._dynamicSlashCommands && this._dynamicSlashCommands.length > 0) {
+			return this._buildNativeCommandsPayload(this._mergeSlashCommands(this._dynamicSlashCommands, staticCommands), ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_RUNTIME_SOURCE, false);
+		}
+		const cachedCommands = this._getCachedSlashCommands();
+		if (cachedCommands && cachedCommands.length > 0) {
+			return this._buildNativeCommandsPayload(this._mergeSlashCommands(cachedCommands, staticCommands), ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_CACHE_SOURCE, true);
+		}
+		return this._buildNativeCommandsPayload(this._mergeSlashCommands(staticCommands), ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_SOURCE, true);
+	}
+
+	private async _sendNativeCommands(): Promise<void> {
+		const payload = await this._getNativeCommandsPayload();
+		this._postMessage({
+			type: 'nativeCommandsData',
+			data: payload
+		});
+	}
+
+	private _parseSlashCommandsFromOutput(output: string): SlashCommandItem[] {
+		const lines = output.split(/\r?\n/);
+		const commands: SlashCommandItem[] = [];
+		for (const line of lines) {
+			const match = line.match(ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_DISCOVERY_REGEX);
+			if (!match || !match.groups?.id) {
+				continue;
+			}
+			const id = this._normalizeSlashCommandId(match.groups.id);
+			if (!id) {
+				continue;
+			}
+			commands.push({
+				id,
+				icon: ClaudeChatProvider.DEFAULT_SLASH_COMMAND_ICONS[id] || ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_FALLBACK_ICON,
+				title: '/' + id,
+				description: ClaudeChatProvider.DEFAULT_SLASH_COMMAND_DESCRIPTION,
+			});
+		}
+		return this._mergeSlashCommands(commands);
+	}
+
+	private async _detectDynamicSlashCommands(): Promise<SlashCommandItem[] | undefined> {
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		const wslEnabled = config.get<boolean>('wsl.enabled', false);
+		const wslDistro = config.get<string>('wsl.distro', 'Ubuntu');
+		const nodePath = config.get<string>('wsl.nodePath', '/usr/bin/node');
+		const claudePath = config.get<string>('wsl.claudePath', '/usr/local/bin/claude');
+		const customExecutablePath = config.get<string>('executable.path', '');
+		const executable = customExecutablePath || 'claude';
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+		const timeout = ClaudeChatProvider.DEFAULT_SLASH_COMMANDS_DISCOVERY_TIMEOUT_MS;
+		try {
+			let stdout = '';
+			let stderr = '';
+			if (wslEnabled) {
+				const wslCommand = `printf '/\\n' | \"${nodePath}\" --no-warnings --enable-source-maps \"${claudePath}\"`;
+				const result = await exec(`wsl -d ${wslDistro} bash -ic ${JSON.stringify(wslCommand)}`, { timeout, cwd });
+				stdout = result.stdout || '';
+				stderr = result.stderr || '';
+			} else {
+				const result = await exec(`printf '/\\n' | ${executable}`, { timeout, cwd, windowsHide: true });
+				stdout = result.stdout || '';
+				stderr = result.stderr || '';
+			}
+			const commands = this._parseSlashCommandsFromOutput(`${stdout}\n${stderr}`);
+			return commands.length > 0 ? commands : undefined;
+		} catch (error) {
+			console.error('Dynamic slash command detection failed:', error);
+			return undefined;
+		}
+	}
+
+	private async _refreshDynamicSlashCommandsIfReady(): Promise<void> {
+		if (this._hasDetectedSlashCommandsThisSession) {
+			return;
+		}
+		this._hasDetectedSlashCommandsThisSession = true;
+		const detected = await this._detectDynamicSlashCommands();
+		if (!detected || detected.length === 0) {
+			return;
+		}
+		await this._cacheDynamicSlashCommands(detected);
+		await this._sendNativeCommands();
 	}
 
 	private async _sendCustomSnippets(): Promise<void> {

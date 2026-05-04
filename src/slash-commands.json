@@ -1,0 +1,140 @@
+[
+  {
+    "id": "add-dir",
+    "icon": "📁",
+    "title": "/add-dir",
+    "description": "Add additional working directories"
+  },
+  {
+    "id": "agents",
+    "icon": "🤖",
+    "title": "/agents",
+    "description": "Manage custom AI subagents for specialized tasks"
+  },
+  {
+    "id": "bug",
+    "icon": "🐛",
+    "title": "/bug",
+    "description": "Report bugs (sends conversation to Anthropic)"
+  },
+  {
+    "id": "clear",
+    "icon": "🗑️",
+    "title": "/clear",
+    "description": "Clear conversation history"
+  },
+  {
+    "id": "compact",
+    "icon": "📦",
+    "title": "/compact",
+    "description": "Compact conversation with optional focus instructions"
+  },
+  {
+    "id": "config",
+    "icon": "⚙️",
+    "title": "/config",
+    "description": "Open the Settings interface (Config tab)"
+  },
+  {
+    "id": "cost",
+    "icon": "💰",
+    "title": "/cost",
+    "description": "Show token usage statistics"
+  },
+  {
+    "id": "doctor",
+    "icon": "🩺",
+    "title": "/doctor",
+    "description": "Checks the health of your Claude Code installation"
+  },
+  {
+    "id": "help",
+    "icon": "❓",
+    "title": "/help",
+    "description": "Get usage help"
+  },
+  {
+    "id": "init",
+    "icon": "🚀",
+    "title": "/init",
+    "description": "Initialize project with CLAUDE.md guide"
+  },
+  {
+    "id": "login",
+    "icon": "🔑",
+    "title": "/login",
+    "description": "Switch Anthropic accounts"
+  },
+  {
+    "id": "logout",
+    "icon": "🚪",
+    "title": "/logout",
+    "description": "Sign out from your Anthropic account"
+  },
+  {
+    "id": "mcp",
+    "icon": "🔌",
+    "title": "/mcp",
+    "description": "Manage MCP server connections and OAuth authentication"
+  },
+  {
+    "id": "memory",
+    "icon": "🧠",
+    "title": "/memory",
+    "description": "Edit CLAUDE.md memory files"
+  },
+  {
+    "id": "model",
+    "icon": "🤖",
+    "title": "/model",
+    "description": "Select or change the AI model"
+  },
+  {
+    "id": "permissions",
+    "icon": "🔒",
+    "title": "/permissions",
+    "description": "View or update permissions"
+  },
+  {
+    "id": "pr_comments",
+    "icon": "💬",
+    "title": "/pr_comments",
+    "description": "View pull request comments"
+  },
+  {
+    "id": "review",
+    "icon": "👀",
+    "title": "/review",
+    "description": "Request code review"
+  },
+  {
+    "id": "rewind",
+    "icon": "⏪",
+    "title": "/rewind",
+    "description": "Rewind the conversation and/or code"
+  },
+  {
+    "id": "status",
+    "icon": "📊",
+    "title": "/status",
+    "description": "Open the Settings interface (Status tab) showing version, model, account, and connectivity"
+  },
+  {
+    "id": "terminal-setup",
+    "icon": "⌨️",
+    "title": "/terminal-setup",
+    "description": "Install Shift+Enter key binding for newlines (iTerm2 and VSCode only)"
+  },
+  {
+    "id": "usage",
+    "icon": "📈",
+    "title": "/usage",
+    "description": "Show plan usage limits and rate limit status (subscription plans only)"
+  },
+  {
+    "id": "vim",
+    "icon": "📝",
+    "title": "/vim",
+    "description": "Enter vim mode for alternating insert and command modes"
+  }
+]
