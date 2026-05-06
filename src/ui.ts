@@ -477,6 +477,10 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 							</div>
 						</div>
 						<input type="text" id="openaiBridgeProfileName" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Bridge profile name">
+						<select id="openaiBridgeCategory" class="env-preset-select" style="width: 100%; margin-bottom: 8px;">
+							<option value="competition">competition</option>
+							<option value="responses">responses</option>
+						</select>
 						<input type="text" id="openaiBridgeBaseUrl" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Bridge base URL, e.g. http://127.0.0.1:8787">
 						<input type="text" id="openaiBridgeUpstreamBaseUrl" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="Upstream base URL, e.g. https://opencode.ai/zen/go/v1">
 						<input type="password" id="openaiBridgeApiKey" class="file-search-input" style="width: 100%; margin-bottom: 8px;" placeholder="OpenAI-compatible API key">

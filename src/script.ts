@@ -5679,6 +5679,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			activeOpenAIBridgeProfileId = select.value || '';
 			const profile = openaiBridgeProfiles.find(function(item) { return item.id === activeOpenAIBridgeProfileId; }) || null;
 			document.getElementById('openaiBridgeProfileName').value = profile ? profile.name || '' : '';
+			document.getElementById('openaiBridgeCategory').value = profile ? profile.category || 'competition' : 'competition';
 			document.getElementById('openaiBridgeBaseUrl').value = profile ? profile.bridgeBaseUrl || 'http://127.0.0.1:8787' : 'http://127.0.0.1:8787';
 			document.getElementById('openaiBridgeUpstreamBaseUrl').value = profile ? profile.upstreamBaseUrl || 'https://opencode.ai/zen/go/v1' : 'https://opencode.ai/zen/go/v1';
 			document.getElementById('openaiBridgeApiKey').value = profile ? profile.apiKey || '' : '';
@@ -5695,6 +5696,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const profile = {
 				id: profileId,
 				name: 'OpenAI Bridge',
+				category: 'competition',
 				bridgeBaseUrl: 'http://127.0.0.1:8787',
 				upstreamBaseUrl: 'https://opencode.ai/zen/go/v1',
 				apiKey: '',
@@ -5717,6 +5719,7 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				profile: {
 					id: activeOpenAIBridgeProfileId || undefined,
 					name: document.getElementById('openaiBridgeProfileName').value,
+					category: document.getElementById('openaiBridgeCategory').value,
 					bridgeBaseUrl: document.getElementById('openaiBridgeBaseUrl').value,
 					upstreamBaseUrl: document.getElementById('openaiBridgeUpstreamBaseUrl').value,
 					apiKey: document.getElementById('openaiBridgeApiKey').value,

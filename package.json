@@ -2,7 +2,7 @@
   "name": "claude-code-chat",
   "displayName": "Chat for Claude Code",
   "description": "Beautiful Claude Code Chat Interface for VS Code",
-  "version": "2.0.22",
+  "version": "2.0.23",
   "publisher": "AndrePimenta",
   "author": "Andre Pimenta",
   "repository": {
@@ -235,6 +235,7 @@
             "properties": {
               "id": { "type": "string" },
               "name": { "type": "string" },
+              "category": { "type": "string", "enum": ["competition", "responses"] },
               "bridgeBaseUrl": { "type": "string" },
               "upstreamBaseUrl": { "type": "string" },
               "apiKey": { "type": "string" },
@@ -283,6 +284,10 @@
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.5.0",
     "eslint": "^9.25.1",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2"
   }
 }

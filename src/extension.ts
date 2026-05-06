@@ -211,9 +211,12 @@ interface EnvPreset {
 	variables: EnvPresetVariables;
 }
 
+type OpenAIBridgeCategory = 'competition' | 'responses';
+
 interface OpenAIBridgeProfile {
 	id: string;
 	name: string;
+	category?: OpenAIBridgeCategory;
 	bridgeBaseUrl: string;
 	upstreamBaseUrl: string;
 	apiKey: string;
@@ -228,6 +231,92 @@ interface OpenAIBridgeProfile {
 	reasoningCachePath?: string;
 	requestBodyLimitBytes?: number;
 	upstreamTimeoutMs?: number;
+}
+
+function normalizeOpenAIBridgeCategory(value: unknown): OpenAIBridgeCategory {
+	return value === 'responses' ? 'responses' : 'competition';
+}
+
+function getPortFromBridgeBaseUrl(bridgeBaseUrl: string | undefined, fallback = 8787): number {
+	return Number((((bridgeBaseUrl || '').match(/:(\d+)(?:\/)?$/) || [])[1]) || fallback);
+}
+
+function buildResponsesBridgeEnv(profile: Pick<OpenAIBridgeProfile, 'bridgeBaseUrl' | 'upstreamBaseUrl' | 'apiKey'>): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		PROXY_PORT: String(getPortFromBridgeBaseUrl(profile.bridgeBaseUrl, 4000)),
+		BACKEND_URL: profile.upstreamBaseUrl || 'https://api.openai.com',
+		BACKEND_FORMAT: 'responses'
+	};
+	if (profile.apiKey) {
+		env.BACKEND_API_KEY = profile.apiKey;
+	}
+	return env;
+}
+
+export const __testNormalizeOpenAIBridgeCategory = normalizeOpenAIBridgeCategory;
+export const __testBuildResponsesBridgeEnv = buildResponsesBridgeEnv;
+
+function getResponsesBridgeDir(extensionPath: string): string {
+	return path.join(extensionPath, 'llm-proxy-main');
+}
+
+function getResponsesBridgeArgs(bridgeDir: string): string[] {
+	return [path.join(bridgeDir, 'index.js')];
+}
+
+function isResponsesBridgeProfile(profile: OpenAIBridgeProfile): boolean {
+	return normalizeOpenAIBridgeCategory(profile.category) === 'responses';
+}
+
+function getOpenAIBridgeHealthPath(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? '/health' : '/health';
+}
+
+function getOpenAIBridgeShutdownPath(profile: OpenAIBridgeProfile): string | null {
+	return isResponsesBridgeProfile(profile) ? null : '/shutdown';
+}
+
+function buildOpenAIBridgeStatusLabel(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? 'Responses bridge' : 'Bridge';
+}
+
+function getOpenAIBridgeStartMessage(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? 'Responses bridge starting...' : 'Bridge starting...';
+}
+
+function getOpenAIBridgeWaitingMessage(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? 'Responses bridge started, waiting for readiness...' : 'Bridge started, waiting for readiness...';
+}
+
+function getOpenAIBridgeReadyMessage(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? 'Responses bridge ready' : 'Bridge ready';
+}
+
+function getOpenAIBridgeExitedMessage(profile: OpenAIBridgeProfile, code: number | null, signal: NodeJS.Signals | null): string {
+	const prefix = isResponsesBridgeProfile(profile) ? 'Responses bridge' : 'Bridge';
+	return `${prefix} exited (${code ?? signal ?? 'unknown'})`;
+}
+
+function getOpenAIBridgeHealthErrorMessage(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? 'Responses bridge started but health check did not pass' : 'Bridge started but health check did not pass';
+}
+
+function getOpenAIBridgeReuseMessage(profile: OpenAIBridgeProfile): string {
+	return isResponsesBridgeProfile(profile) ? 'Reusing existing healthy responses bridge (managed remotely)' : 'Reusing existing healthy bridge (managed remotely)';
+}
+
+function getOpenAIBridgeStoppedMessage(profile: OpenAIBridgeProfile | undefined): string {
+	return profile && isResponsesBridgeProfile(profile) ? 'Responses bridge stopped' : 'Bridge stopped';
+}
+
+function getOpenAIBridgeProbeUrl(profile: OpenAIBridgeProfile, port: number): string {
+	return `http://127.0.0.1:${port}${getOpenAIBridgeHealthPath(profile)}`;
+}
+
+function getOpenAIBridgeShutdownUrl(profile: OpenAIBridgeProfile, port: number): string | null {
+	const shutdownPath = getOpenAIBridgeShutdownPath(profile);
+	return shutdownPath ? `http://127.0.0.1:${port}${shutdownPath}` : null;
 }
 
 interface OpenAIBridgeRuntimeState {
@@ -590,6 +679,7 @@ class ClaudeChatProvider {
 		return (profiles || []).map((profile, index) => ({
 			id: typeof profile?.id === 'string' && profile.id ? profile.id : 'bridge-' + index,
 			name: typeof profile?.name === 'string' && profile.name ? profile.name : 'OpenAI Bridge ' + (index + 1),
+			category: normalizeOpenAIBridgeCategory(profile?.category),
 			bridgeBaseUrl: typeof profile?.bridgeBaseUrl === 'string' && profile.bridgeBaseUrl ? profile.bridgeBaseUrl : 'http://127.0.0.1:8787',
 			upstreamBaseUrl: typeof profile?.upstreamBaseUrl === 'string' && profile.upstreamBaseUrl ? profile.upstreamBaseUrl : 'https://opencode.ai/zen/go/v1',
 			apiKey: typeof profile?.apiKey === 'string' ? profile.apiKey : '',
@@ -685,6 +775,7 @@ class ClaudeChatProvider {
 		const normalized: OpenAIBridgeProfile = {
 			id: profileId,
 			name: typeof profile?.name === 'string' && profile.name.trim() ? profile.name.trim() : 'OpenAI Bridge',
+			category: normalizeOpenAIBridgeCategory(profile?.category),
 			bridgeBaseUrl: typeof profile?.bridgeBaseUrl === 'string' && profile.bridgeBaseUrl.trim() ? profile.bridgeBaseUrl.trim() : 'http://127.0.0.1:8787',
 			upstreamBaseUrl: typeof profile?.upstreamBaseUrl === 'string' && profile.upstreamBaseUrl.trim() ? profile.upstreamBaseUrl.trim() : 'https://opencode.ai/zen/go/v1',
 			apiKey: typeof profile?.apiKey === 'string' ? profile.apiKey.trim() : '',
@@ -753,7 +844,7 @@ class ClaudeChatProvider {
 		const configPayload = {
 			listen: {
 				host: '127.0.0.1',
-				port: Number((profile.bridgeBaseUrl.match(/:(\d+)(?:\/)?$/) || [])[1] || 8787)
+				port: getPortFromBridgeBaseUrl(profile.bridgeBaseUrl, 8787)
 			},
 			upstream: {
 				baseUrl: profile.upstreamBaseUrl || 'https://opencode.ai/zen/go/v1'
@@ -768,9 +859,75 @@ class ClaudeChatProvider {
 		return configPath;
 	}
 
+	private _getResponsesBridgeDir(): string {
+		return getResponsesBridgeDir(this._context.extensionPath);
+	}
+
+	private _buildResponsesBridgeEnv(profile: OpenAIBridgeProfile): NodeJS.ProcessEnv {
+		return buildResponsesBridgeEnv(profile);
+	}
+
+	private async _startResponsesBridge(profile: OpenAIBridgeProfile, profileId: string, port: number): Promise<void> {
+		const dir = this._getResponsesBridgeDir();
+		const proc = cp.spawn(process.execPath, getResponsesBridgeArgs(dir), {
+			cwd: dir,
+			stdio: ['ignore', 'pipe', 'pipe'],
+			env: this._buildResponsesBridgeEnv(profile)
+		});
+		this._openAIBridgeRemoteControlled = false;
+		this._openAIBridgeProcess = proc;
+		this._openAIBridgeRuntimeState = { status: 'running', profileId, port, pid: proc.pid, message: getOpenAIBridgeWaitingMessage(profile) };
+		proc.once('exit', (code, signal) => {
+			this._openAIBridgeProcess = undefined;
+			this._openAIBridgeRuntimeState = { status: 'stopped', profileId, port, message: getOpenAIBridgeExitedMessage(profile, code, signal) };
+			this._sendCurrentSettings();
+		});
+		proc.stderr?.on('data', (chunk) => {
+			const currentStatus = this._openAIBridgeRuntimeState?.status === 'ready' ? 'ready' : 'running';
+			this._openAIBridgeRuntimeState = { ...(this._openAIBridgeRuntimeState || { status: 'error', profileId, port }), status: currentStatus, profileId, port, pid: proc.pid, message: String(chunk).trim() || (currentStatus === 'ready' ? getOpenAIBridgeReadyMessage(profile) : getOpenAIBridgeWaitingMessage(profile)) };
+			this._sendCurrentSettings();
+		});
+		void this._probeOpenAIBridgeReady(profileId, port);
+		this._sendCurrentSettings();
+	}
+
+	private async _startCompetitionBridge(profile: OpenAIBridgeProfile, profileId: string, port: number): Promise<void> {
+		const dir = this._getBundledOpenAIBridgeDir();
+		const configPath = await this._writeOpenAIBridgeTempConfig(profile);
+		const proc = cp.spawn(process.execPath, ['server.js', '--config', configPath], {
+			cwd: dir,
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		this._openAIBridgeRemoteControlled = false;
+		this._openAIBridgeProcess = proc;
+		this._openAIBridgeRuntimeState = { status: 'running', profileId, port, pid: proc.pid, message: getOpenAIBridgeWaitingMessage(profile) };
+		proc.once('exit', (code, signal) => {
+			this._openAIBridgeProcess = undefined;
+			this._openAIBridgeRuntimeState = { status: 'stopped', profileId, port, message: getOpenAIBridgeExitedMessage(profile, code, signal) };
+			this._sendCurrentSettings();
+		});
+		proc.stderr?.on('data', (chunk) => {
+			const currentStatus = this._openAIBridgeRuntimeState?.status === 'ready' ? 'ready' : 'running';
+			this._openAIBridgeRuntimeState = { ...(this._openAIBridgeRuntimeState || { status: 'error', profileId, port }), status: currentStatus, profileId, port, pid: proc.pid, message: String(chunk).trim() || (currentStatus === 'ready' ? getOpenAIBridgeReadyMessage(profile) : getOpenAIBridgeWaitingMessage(profile)) };
+			this._sendCurrentSettings();
+		});
+		void this._probeOpenAIBridgeReady(profileId, port);
+		this._sendCurrentSettings();
+	}
+
+	private _findOpenAIBridgeProfile(profileId: string | undefined): OpenAIBridgeProfile | undefined {
+		if (!profileId) return undefined;
+		const config = vscode.workspace.getConfiguration('claudeCodeChat');
+		return this._getOpenAIBridgeProfiles(config).find(item => item.id === profileId);
+	}
+
 	private async _probeExistingOpenAIBridge(profileId: string, port: number): Promise<boolean> {
+		const profile = this._findOpenAIBridgeProfile(profileId);
+		if (!profile) {
+			return false;
+		}
 		try {
-			const response = await fetch(`http://127.0.0.1:${port}/health`);
+			const response = await fetch(getOpenAIBridgeProbeUrl(profile, port));
 			if (!response.ok) {
 				return false;
 			}
@@ -780,7 +937,7 @@ class ClaudeChatProvider {
 				status: 'ready',
 				profileId,
 				port,
-				message: 'Reusing existing healthy bridge (managed remotely)'
+				message: getOpenAIBridgeReuseMessage(profile)
 			};
 			this._sendCurrentSettings();
 			return true;
@@ -794,45 +951,33 @@ class ClaudeChatProvider {
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
 		const profile = this._getOpenAIBridgeProfiles(config).find(item => item.id === profileId);
 		if (!profile) return;
-		const port = Number((profile.bridgeBaseUrl.match(/:(\d+)(?:\/)?$/) || [])[1] || 8787);
+		const port = getPortFromBridgeBaseUrl(profile.bridgeBaseUrl, 8787);
 		if (await this._probeExistingOpenAIBridge(profileId, port)) {
 			return;
 		}
 		await this._stopOpenAIBridge();
-		this._openAIBridgeRuntimeState = { status: 'starting', profileId, port, message: 'Bridge starting...' };
+		this._openAIBridgeRuntimeState = { status: 'starting', profileId, port, message: getOpenAIBridgeStartMessage(profile) };
 		this._sendCurrentSettings();
-		const dir = this._getBundledOpenAIBridgeDir();
-		const configPath = await this._writeOpenAIBridgeTempConfig(profile);
-		const proc = cp.spawn(process.execPath, ['server.js', '--config', configPath], {
-			cwd: dir,
-			stdio: ['ignore', 'pipe', 'pipe']
-		});
-		this._openAIBridgeRemoteControlled = false;
-		this._openAIBridgeProcess = proc;
-		this._openAIBridgeRuntimeState = { status: 'running', profileId, port, pid: proc.pid, message: 'Bridge started, waiting for readiness...' };
-		proc.once('exit', (code, signal) => {
-			this._openAIBridgeProcess = undefined;
-			this._openAIBridgeRuntimeState = { status: 'stopped', profileId, port, message: `Bridge exited (${code ?? signal ?? 'unknown'})` };
-			this._sendCurrentSettings();
-		});
-		proc.stderr?.on('data', (chunk) => {
-			const currentStatus = this._openAIBridgeRuntimeState?.status === 'ready' ? 'ready' : 'running';
-			this._openAIBridgeRuntimeState = { ...(this._openAIBridgeRuntimeState || { status: 'error', profileId, port }), status: currentStatus, profileId, port, pid: proc.pid, message: String(chunk).trim() || (currentStatus === 'ready' ? 'Bridge ready' : 'Bridge started, waiting for readiness...') };
-			this._sendCurrentSettings();
-		});
-		void this._probeOpenAIBridgeReady(profileId, port);
-		this._sendCurrentSettings();
+		if (isResponsesBridgeProfile(profile)) {
+			await this._startResponsesBridge(profile, profileId, port);
+			return;
+		}
+		await this._startCompetitionBridge(profile, profileId, port);
 	}
 
 	public async _stopOpenAIBridge(): Promise<void> {
 		const runtime = this._openAIBridgeRuntimeState;
-		if (this._openAIBridgeRemoteControlled && runtime?.port) {
-			try {
-				await fetch(`http://127.0.0.1:${runtime.port}/shutdown`, {
-					method: 'POST'
-				});
-			} catch {
-				// ignore remote shutdown failure and continue cleanup
+		const runtimeProfile = runtime?.profileId ? this._findOpenAIBridgeProfile(runtime.profileId) : undefined;
+		if (this._openAIBridgeRemoteControlled && runtime?.port && runtimeProfile) {
+			const shutdownUrl = getOpenAIBridgeShutdownUrl(runtimeProfile, runtime.port);
+			if (shutdownUrl) {
+				try {
+					await fetch(shutdownUrl, {
+						method: 'POST'
+					});
+				} catch {
+					// ignore remote shutdown failure and continue cleanup
+				}
 			}
 		}
 		const proc = this._openAIBridgeProcess;
@@ -846,13 +991,17 @@ class ClaudeChatProvider {
 		this._openAIBridgeProcess = undefined;
 		this._openAIBridgeRemoteControlled = false;
 		if (this._openAIBridgeRuntimeState) {
-			this._openAIBridgeRuntimeState = { ...this._openAIBridgeRuntimeState, status: 'stopped', message: 'Bridge stopped' };
+			this._openAIBridgeRuntimeState = { ...this._openAIBridgeRuntimeState, status: 'stopped', message: getOpenAIBridgeStoppedMessage(runtimeProfile) };
 		}
 		this._sendCurrentSettings();
 	}
 
 	private async _probeOpenAIBridgeReady(profileId: string, port: number): Promise<void> {
-		const probeUrl = `http://127.0.0.1:${port}/health`;
+		const profile = this._findOpenAIBridgeProfile(profileId);
+		if (!profile) {
+			return;
+		}
+		const probeUrl = getOpenAIBridgeProbeUrl(profile, port);
 		for (let attempt = 0; attempt < 10; attempt += 1) {
 			if (!this._openAIBridgeRuntimeState || this._openAIBridgeRuntimeState.profileId !== profileId) {
 				return;
@@ -863,7 +1012,7 @@ class ClaudeChatProvider {
 					this._openAIBridgeRuntimeState = {
 						...this._openAIBridgeRuntimeState,
 						status: 'ready',
-						message: 'Bridge ready'
+						message: getOpenAIBridgeReadyMessage(profile)
 					};
 					this._sendCurrentSettings();
 					return;
@@ -877,7 +1026,7 @@ class ClaudeChatProvider {
 			this._openAIBridgeRuntimeState = {
 				...this._openAIBridgeRuntimeState,
 				status: 'error',
-				message: 'Bridge started but health check did not pass'
+				message: getOpenAIBridgeHealthErrorMessage(profile)
 			};
 			this._sendCurrentSettings();
 		}

@@ -13,7 +13,10 @@ backup
 .claude
 claude-code-chat-permissions-mcp/**
 node_modules
+!llm-proxy-main/node_modules/**
+llm-proxy-main/node_modules/claude-code-chat
 mcp-permissions.js
 backup-files
 build
 !deepseek-v4-opencode-claude-code-bridge-main/**
+!llm-proxy-main/**
