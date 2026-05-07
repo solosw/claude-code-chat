@@ -10,6 +10,24 @@ import { startRouter, stopRouter, setModelConfig, setBaseUrl, getAnthropicUsageS
 export function resolveUsageStatsTarget(_usageType: string): 'local-modal' {
 	return 'local-modal';
 }
+
+export function extractAnthropicUsageFromStreamEvent(jsonData: any): {
+	input_tokens: number;
+	output_tokens: number;
+	cache_read_input_tokens: number;
+	cache_creation_input_tokens: number;
+} | null {
+	const usage = jsonData?.message?.usage || jsonData?.usage;
+	if (!usage || typeof usage !== 'object') {
+		return null;
+	}
+	return {
+		input_tokens: usage.input_tokens || 0,
+		output_tokens: usage.output_tokens || 0,
+		cache_read_input_tokens: usage.cache_read_input_tokens || 0,
+		cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
+	};
+}
 import { fetchAndResolveModels } from './model-updater';
 import recommendedModels from './recommended-models.json';
 import { findSessionsForWorkspace, SessionMessagePreview } from './checkpointService';
@@ -2193,25 +2211,26 @@ class ClaudeChatProvider {
 				break;
 
 			case 'assistant':
-				if (jsonData.message && jsonData.message.content) {
-					// Track token usage in real-time if available
-					if (jsonData.message.usage) {
-						this._totalTokensInput += jsonData.message.usage.input_tokens || 0;
-						this._totalTokensOutput += jsonData.message.usage.output_tokens || 0;
+			case 'message_delta':
+				const assistantUsage = extractAnthropicUsageFromStreamEvent(jsonData);
+				if (assistantUsage) {
+					this._totalTokensInput += assistantUsage.input_tokens || 0;
+					this._totalTokensOutput += assistantUsage.output_tokens || 0;
 
-						// Send real-time token update to webview
-						this._sendAndSaveMessage({
-							type: 'updateTokens',
-							data: {
-								totalTokensInput: this._totalTokensInput,
-								totalTokensOutput: this._totalTokensOutput,
-								currentInputTokens: jsonData.message.usage.input_tokens || 0,
-								currentOutputTokens: jsonData.message.usage.output_tokens || 0,
-								cacheCreationTokens: jsonData.message.usage.cache_creation_input_tokens || 0,
-								cacheReadTokens: jsonData.message.usage.cache_read_input_tokens || 0
-							}
-						});
-					}
+					// Send real-time token update to webview
+					this._sendAndSaveMessage({
+						type: 'updateTokens',
+						data: {
+							totalTokensInput: this._totalTokensInput,
+							totalTokensOutput: this._totalTokensOutput,
+							currentInputTokens: assistantUsage.input_tokens || 0,
+							currentOutputTokens: assistantUsage.output_tokens || 0,
+							cacheCreationTokens: assistantUsage.cache_creation_input_tokens || 0,
+							cacheReadTokens: assistantUsage.cache_read_input_tokens || 0
+						}
+					});
+				}
+				if (jsonData.message && jsonData.message.content) {
 
 					// Process each content item in the assistant message
 					for (const content of jsonData.message.content) {

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { resolveUsageStatsTarget } from '../extension.js';
+import { resolveUsageStatsTarget, extractAnthropicUsageFromStreamEvent } from '../extension.js';
 import getScript, { getSessionTokenTotals } from '../script.js';
 
 suite('Usage panel routing', () => {
@@ -40,6 +40,34 @@ suite('Session token totals', () => {
 		});
 		assert.strictEqual(totals.input, 10);
 		assert.strictEqual(totals.output, 20);
+	});
+});
+
+suite('Anthropic usage extraction', () => {
+	test('extracts usage from message_delta usage when message usage is absent', () => {
+		const usage = extractAnthropicUsageFromStreamEvent({
+			type: 'message_delta',
+			usage: {
+				input_tokens: 111,
+				output_tokens: 222,
+				cache_read_input_tokens: 333,
+				cache_creation_input_tokens: 444,
+			},
+		});
+		assert.deepStrictEqual(usage, {
+			input_tokens: 111,
+			output_tokens: 222,
+			cache_read_input_tokens: 333,
+			cache_creation_input_tokens: 444,
+		});
+	});
+
+	test('message_delta usage increments local totals', () => {
+		const script = getScript(false);
+		assert.ok(script.includes("case 'message_delta':"));
+		assert.ok(script.includes('const deltaUsage = extractAnthropicUsageFromStreamEvent(jsonData);'));
+		assert.ok(script.includes('this._totalTokensInput += deltaUsage.input_tokens || 0;'));
+		assert.ok(script.includes('this._totalTokensOutput += deltaUsage.output_tokens || 0;'));
 	});
 });
 
