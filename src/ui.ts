@@ -196,13 +196,17 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 	</div>
 	
 	<div class="status ready" id="status">
-		<div class="status-indicator"></div>
-		<div class="status-text" id="statusText">Initializing...</div>
-		<button class="support-btn" onclick="showSupportModal()" title="Send feedback">
-			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-			Support
-		</button>
-	</div>
+	<div class="status-indicator"></div>
+	<div class="status-text" id="statusText">Initializing...</div>
+	<button class="support-btn" onclick="showUsageStatsModal()" title="Usage Statistics">
+	<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M7 14v-4"/><path d="M12 14v-7"/><path d="M17 14v-2"/></svg>
+	Usage
+	</button>
+	 <button class="support-btn" onclick="showSupportModal()" title="Send feedback">
+				<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+				Support
+			</button>
+		</div>
 
 			<div id="yoloWarning" class="yolo-warning" style="display: none;">
 			⚠️ Yolo Mode Active: Claude Code will auto-approve all tool requests.
@@ -337,7 +341,18 @@ const getHtml = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https
 		</div>
 	</div>
 
-	<!-- Settings modal -->
+	<!-- Usage Stats modal -->
+		<div id="usageStatsModal" class="tools-modal" style="display: none;">
+			<div class="tools-modal-content" style="max-width: 420px;">
+				<div class="tools-modal-header">
+					<span>Usage Statistics</span>
+					<button class="tools-close-btn" onclick="hideUsageStatsModal()">✕</button>
+				</div>
+				<div id="usageStatsContent" style="padding: 16px;"></div>
+			</div>
+		</div>
+
+		<!-- Settings modal -->
 	<div id="settingsModal" class="tools-modal" style="display: none;">
 		<div class="tools-modal-content" style="max-height: 600px;">
 			<div class="tools-modal-header">

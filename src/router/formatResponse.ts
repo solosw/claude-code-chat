@@ -1,3 +1,5 @@
+import { recordAnthropicUsage } from './usageStats';
+
 export function formatOpenAIToAnthropic(completion: any, model: string): any {
   const messageId = "msg_" + Date.now();
   const message = completion.choices[0].message;
@@ -31,7 +33,10 @@ export function formatOpenAIToAnthropic(completion: any, model: string): any {
     usage: {
       input_tokens: usage.prompt_tokens || 0,
       output_tokens: usage.completion_tokens || 0,
+      cache_read_input_tokens: usage.cache_read_input_tokens || 0,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
     },
   };
+  recordAnthropicUsage(result.usage);
   return result;
 }

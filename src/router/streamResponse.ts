@@ -1,3 +1,5 @@
+import { recordAnthropicUsage } from './usageStats';
+
 export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: string): ReadableStream {
   const messageId = "msg_" + Date.now();
   let reader: ReadableStreamDefaultReader<any> | null = null;
@@ -35,7 +37,7 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
       let isToolUse = false;
       let currentToolCallId: string | null = null;
       let toolCallJsonMap = new Map<string, string>();
-      let streamUsage: { input_tokens: number; output_tokens: number } | null = null;
+      let streamUsage: { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } | null = null;
 
       reader = openaiStream.getReader();
       const decoder = new TextDecoder();
@@ -103,6 +105,8 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
           streamUsage = {
             input_tokens: parsed.usage.prompt_tokens || 0,
             output_tokens: parsed.usage.completion_tokens || 0,
+            cache_read_input_tokens: parsed.usage.cache_read_input_tokens || 0,
+            cache_creation_input_tokens: parsed.usage.cache_creation_input_tokens || 0,
           };
         }
 
@@ -212,14 +216,18 @@ export function streamOpenAIToAnthropic(openaiStream: ReadableStream, model: str
       }
 
       // Send message_delta and message_stop
+      const finalUsage = streamUsage || { input_tokens: 0, output_tokens: 0 };
       enqueueSSE(controller, "message_delta", {
         type: "message_delta",
         delta: {
           stop_reason: isToolUse ? "tool_use" : "end_turn",
           stop_sequence: null,
         },
-        usage: streamUsage || { input_tokens: 0, output_tokens: 0 },
+        usage: finalUsage,
       });
+
+      // Record usage stats for Anthropic cache tracking
+      recordAnthropicUsage(finalUsage);
 
       enqueueSSE(controller, "message_stop", {
         type: "message_stop",

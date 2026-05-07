@@ -5,7 +5,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import getHtml from './ui';
-import { startRouter, stopRouter, setModelConfig, setBaseUrl } from './router';
+import { startRouter, stopRouter, setModelConfig, setBaseUrl, getAnthropicUsageStats, resetAnthropicUsageStats, recordAnthropicUsage, AnthropicUsageStats } from './router';
+
+export function resolveUsageStatsTarget(_usageType: string): 'local-modal' {
+	return 'local-modal';
+}
 import { fetchAndResolveModels } from './model-updater';
 import recommendedModels from './recommended-models.json';
 import { findSessionsForWorkspace, SessionMessagePreview } from './checkpointService';
@@ -410,6 +414,7 @@ class ClaudeChatWebviewProvider implements vscode.WebviewViewProvider {
 
 class ClaudeChatProvider {
 	private static readonly LATEST_CHANGES_STATE_KEY = 'claude.latestChanges';
+	private static readonly ANTHROPIC_USAGE_STATS_STATE_KEY = 'claude.routerAnthropicUsageStats';
 	public _panel: vscode.WebviewPanel | undefined;
 	private _webview: vscode.Webview | undefined;
 	private _webviewView: vscode.WebviewView | undefined;
@@ -419,6 +424,13 @@ class ClaudeChatProvider {
 	private _totalTokensInput: number = 0;
 	private _totalTokensOutput: number = 0;
 	private _requestCount: number = 0;
+	private _routerAnthropicUsageStats: AnthropicUsageStats = {
+		totalInputTokens: 0,
+		totalOutputTokens: 0,
+		totalCacheReadInputTokens: 0,
+		totalCacheCreationInputTokens: 0,
+		cacheHitRate: 0,
+	};
 	private _subscriptionType: string | undefined;  // 'pro', 'max', or undefined for API users
 	private _accountInfoFetchedThisSession: boolean = false;  // Track if we fetched account info this session
 	private _pendingModelAfterPayment: string | null = null;
@@ -535,6 +547,14 @@ class ClaudeChatProvider {
 
 		// Load cached subscription type (will be refreshed on first message)
 		this._subscriptionType = this._context.globalState.get('claude.subscriptionType');
+		this._routerAnthropicUsageStats = this._context.globalState.get<AnthropicUsageStats>(ClaudeChatProvider.ANTHROPIC_USAGE_STATS_STATE_KEY, this._routerAnthropicUsageStats);
+		resetAnthropicUsageStats();
+		recordAnthropicUsage({
+			input_tokens: this._routerAnthropicUsageStats.totalInputTokens,
+			output_tokens: this._routerAnthropicUsageStats.totalOutputTokens,
+			cache_read_input_tokens: this._routerAnthropicUsageStats.totalCacheReadInputTokens,
+			cache_creation_input_tokens: this._routerAnthropicUsageStats.totalCacheCreationInputTokens,
+		});
 		this._dynamicSlashCommands = this._context.globalState.get<SlashCommandItem[]>(ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_CACHE_KEY);
 		this._dynamicSlashCommandsDetectedAt = this._context.globalState.get<number>(ClaudeChatProvider.DYNAMIC_SLASH_COMMANDS_DETECTED_AT_CACHE_KEY);
 
@@ -4720,7 +4740,17 @@ class ClaudeChatProvider {
 		return getHtml(vscode.env?.isTelemetryEnabled, OPENCREDITS_API_URL, OPENCREDITS_WEB_URL, OPENCREDITS_PUBLISHABLE_KEY, vscode.env?.appName);
 	}
 
+	private _syncRouterAnthropicUsageStats(): void {
+		this._routerAnthropicUsageStats = getAnthropicUsageStats();
+		void this._context.globalState.update(ClaudeChatProvider.ANTHROPIC_USAGE_STATS_STATE_KEY, this._routerAnthropicUsageStats);
+		this._postMessage({
+			type: 'anthropicUsageStatsUpdate',
+			data: this._routerAnthropicUsageStats,
+		});
+	}
+
 	private _sendCurrentSettings(): void {
+		this._syncRouterAnthropicUsageStats();
 		const config = vscode.workspace.getConfiguration('claudeCodeChat');
 		const settings = {
 			'thinking.intensity': config.get<string>('thinking.intensity', 'think'),
@@ -4737,6 +4767,7 @@ class ClaudeChatProvider {
 			'environment.activePresetId': config.get<string>('environment.activePresetId', ''),
 			'openaiBridge.profiles': this._getOpenAIBridgeProfiles(config),
 			'openaiBridge.runtimeState': this._openAIBridgeRuntimeState || null,
+			'router.anthropicUsageStats': this._routerAnthropicUsageStats,
 			'environment.disabled': config.get<boolean>('environment.disabled', false),
 			'isOpenCredits': this._isOpenCredits()
 		};
@@ -5085,32 +5116,12 @@ class ClaudeChatProvider {
 	}
 
 	private _openUsageTerminal(usageType: string): void {
-		// Get WSL configuration
-		const config = vscode.workspace.getConfiguration('claudeCodeChat');
-		const wslEnabled = config.get<boolean>('wsl.enabled', false);
-		const wslDistro = config.get<string>('wsl.distro', 'Ubuntu');
-
-		const terminal = vscode.window.createTerminal({
-			name: 'Claude Usage',
-			location: { viewColumn: vscode.ViewColumn.One }
-		});
-
-		let command: string;
-		if (usageType === 'plan') {
-			// Plan users get live usage view
-			command = 'npx -y ccusage blocks --live';
-		} else {
-			// API users get recent usage history
-			command = 'npx -y ccusage blocks --recent --order desc';
+		if (resolveUsageStatsTarget(usageType) === 'local-modal') {
+			this._postMessage({
+				type: 'openUsageStatsModal'
+			});
+			return;
 		}
-
-		if (wslEnabled) {
-			terminal.sendText(`wsl -d ${wslDistro} bash -ic "${command}"`);
-		} else {
-			terminal.sendText(command);
-		}
-
-		terminal.show();
 	}
 
 	private _runInstallCommand(): void {

@@ -1,6 +1,25 @@
 import getSkillsScript from './skills-script';
 import getPluginsScript from './plugins-script';
 
+export function getSessionTokenTotals(input: {
+	totalTokensInput: number;
+	totalTokensOutput: number;
+	anthropicTotalInputTokens: number;
+	anthropicTotalOutputTokens: number;
+}): { input: number; output: number } {
+	const anthropicTotal = (input.anthropicTotalInputTokens || 0) + (input.anthropicTotalOutputTokens || 0);
+	if (anthropicTotal > 0) {
+		return {
+			input: input.anthropicTotalInputTokens || 0,
+			output: input.anthropicTotalOutputTokens || 0,
+		};
+	}
+	return {
+		input: input.totalTokensInput || 0,
+		output: input.totalTokensOutput || 0,
+	};
+}
+
 const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'https://ccc.api.opencredits.ai', opencreditsWebUrl: string = 'https://ccc.opencredits.ai', opencreditsPublishableKey: string = 'oc_pk_c43da4f9a9484ae484ad29bc97cc354f') => `<script>
 		var OPENCREDITS_API_URL = '${opencreditsApiUrl}';
 		var OPENCREDITS_WEB_URL = '${opencreditsWebUrl}';
@@ -1444,6 +1463,32 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		let totalTokensInput = 0;
 		let totalTokensOutput = 0;
 		let requestCount = 0;
+		// Router/Bridge stats (from anthropicUsageStatsUpdate and settingsData)
+		let routerCacheHitRate = 0;
+		let routerCacheReadInputTokens = 0;
+		let routerCacheCreationInputTokens = 0;
+		let routerInputTokens = 0;
+			let routerOutputTokens = 0;
+			// Direct Claude response stats (from updateTokens)
+			let directCacheReadInputTokens = 0;
+			let directCacheCreationInputTokens = 0;
+			let directInputTokens = 0;
+			let directOutputTokens = 0;
+			// Computed totals for status bar
+			let anthropicCacheHitRate = 0;
+			let anthropicTotalCacheReadInputTokens = 0;
+			let anthropicTotalCacheCreationInputTokens = 0;
+			let anthropicTotalInputTokens = 0;
+			let anthropicTotalOutputTokens = 0;
+
+			function recalcAnthropicTotals() {
+				anthropicTotalInputTokens = routerInputTokens + directInputTokens;
+				anthropicTotalOutputTokens = routerOutputTokens + directOutputTokens;
+				anthropicTotalCacheReadInputTokens = routerCacheReadInputTokens + directCacheReadInputTokens;
+				anthropicTotalCacheCreationInputTokens = routerCacheCreationInputTokens + directCacheCreationInputTokens;
+				const promptTotal = anthropicTotalInputTokens + anthropicTotalCacheReadInputTokens;
+				anthropicCacheHitRate = promptTotal > 0 ? anthropicTotalCacheReadInputTokens / promptTotal : 0;
+			}
 		let isProcessing = false;
 		let requestStartTime = null;
 		let requestTimer = null;
@@ -1501,9 +1546,15 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				} else {
 					// Regular users: show tokens and elapsed time
 					const totalTokens = totalTokensInput + totalTokensOutput;
-					const tokensStr = totalTokens > 0 ?
+					const sessionInputTokens = (anthropicTotalInputTokens + anthropicTotalOutputTokens) > 0 ? anthropicTotalInputTokens : totalTokensInput;
+					const sessionOutputTokens = (anthropicTotalInputTokens + anthropicTotalOutputTokens) > 0 ? anthropicTotalOutputTokens : totalTokensOutput;
+					const sessionTotalTokens = sessionInputTokens + sessionOutputTokens;
+					const tokensStr = sessionTotalTokens > 0 ?
 						totalTokens.toLocaleString() + ' tokens' : '0 tokens';
-					statusText = waitingLabel + ' • ' + tokensStr + (elapsedStr ? ' • ' + elapsedStr : '');
+					const cacheRateStr = anthropicTotalInputTokens + anthropicTotalCacheReadInputTokens > 0
+						? ' • Cache ' + (anthropicCacheHitRate * 100).toFixed(1) + '%'
+						: '';
+					statusText = waitingLabel + ' • ' + tokensStr + cacheRateStr + (elapsedStr ? ' • ' + elapsedStr : '');
 				}
 				updateStatus(statusText, 'processing');
 			} else {
@@ -1523,26 +1574,44 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					// Plan subscriber: show plan type
 					let planName = subscriptionType.replace(/^claude\\s*/i, '').trim();
 					planName = planName.charAt(0).toUpperCase() + planName.slice(1);
-					usageStr = \`<a href="#" onclick="event.preventDefault(); viewUsage('plan');" class="usage-badge" title="View live usage">\${planName} Plan\${usageIcon}</a>\`;
+					usageStr = \`<a href="#" onclick="event.preventDefault(); showUsageStatsModal();" class="usage-badge" title="View usage stats">\${planName} Plan\${usageIcon}</a>\`;
 				} else {
 					// API user: show cost
 					const costStr = totalCost > 0 ? \`$\${totalCost.toFixed(4)}\` : '$0.00';
-					usageStr = \`<a href="#" onclick="event.preventDefault(); viewUsage('api');" class="usage-badge" title="View usage">\${costStr}\${usageIcon}</a>\`;
+					usageStr = \`<a href="#" onclick="event.preventDefault(); showUsageStatsModal();" class="usage-badge" title="View usage stats">\${costStr}\${usageIcon}</a>\`;
 				}
 
 				let statusText;
 				if (hasOpenCreditsKey) {
-					// OpenCredits users with OpenCredits model: just show ready and balance (no tokens)
-					const requestStr = requestCount > 0 ? \`\${requestCount} requests\` : '';
-					statusText = \`Ready\${requestStr ? \` • \${requestStr}\` : ''} • \${usageStr}\`;
+				// OpenCredits users with OpenCredits model: just show ready and balance (no tokens)
+				const requestStr = requestCount > 0 ? \`\${requestCount} requests\` : '';
+				const anthropicTotal = anthropicTotalInputTokens + anthropicTotalOutputTokens;
+				 const anthropicParts = [];
+				if (anthropicTotal > 0) anthropicParts.push(\`Anthropic \${anthropicTotal.toLocaleString()}\`);
+				if (anthropicTotalInputTokens + anthropicTotalCacheReadInputTokens > 0) anthropicParts.push(\`Cache \${(anthropicCacheHitRate * 100).toFixed(1)}%\`);
+				const runtimeStatsLink = anthropicParts.length > 0
+				? \`<a href="#" onclick="event.preventDefault(); showUsageStatsModal();" class="usage-badge" title="View usage stats">\${anthropicParts.join(' • ')}</a>\`
+				 : '';
+				statusText = \`Ready\${runtimeStatsLink ? ' • ' : ''}\${runtimeStatsLink}\${requestStr ? \` • \${requestStr}\` : ''} • \${usageStr}\`;
 				} else {
-					// Regular users: show tokens, requests, and usage
-					const totalTokens = totalTokensInput + totalTokensOutput;
-					const tokensStr = totalTokens > 0 ?
-						\`\${totalTokens.toLocaleString()} tokens\` : '0 tokens';
-					const requestStr = requestCount > 0 ? \`\${requestCount} requests\` : '';
-					statusText = \`Ready • \${tokensStr}\${requestStr ? \` • \${requestStr}\` : ''} • \${usageStr}\`;
-				}
+				// Regular users: show tokens, requests, usage, and Anthropic cache stats
+				const totalTokens = totalTokensInput + totalTokensOutput;
+				const tokensStr = totalTokens > 0 ?
+				\`\${totalTokens.toLocaleString()} tokens\` : '0 tokens';
+				const requestStr = requestCount > 0 ? \`\${requestCount} requests\` : '';
+				const anthropicTokensTotal = anthropicTotalInputTokens + anthropicTotalOutputTokens;
+				const anthropicTokensStr = anthropicTokensTotal > 0
+				  ? \`Anthropic \${anthropicTokensTotal.toLocaleString()}\`
+							: '';
+						const cacheRateStr = anthropicTotalInputTokens + anthropicTotalCacheReadInputTokens > 0
+							? \`Cache \${(anthropicCacheHitRate * 100).toFixed(1)}%\`
+							: '';
+						const anthropicParts = [anthropicTokensStr, cacheRateStr].filter(Boolean);
+						const runtimeStats = anthropicParts.length > 0
+							? \`<a href="#" onclick="event.preventDefault(); showUsageStatsModal();" class="usage-badge" title="View usage stats">\${anthropicParts.join(' • ')}</a>\`
+							: '';
+						statusText = \`Ready • \${tokensStr}\${requestStr ? \` • \${requestStr}\` : ''}\${runtimeStats ? \` • \${runtimeStats}\` : ''} • \${usageStr}\`;
+					}
 				updateStatusHtml(statusText, 'ready');
 			}
 		}
@@ -4259,6 +4328,13 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					// Update token totals in real-time
 					totalTokensInput = message.data.totalTokensInput || 0;
 					totalTokensOutput = message.data.totalTokensOutput || 0;
+
+					// Accumulate direct Claude response cache stats
+					if (message.data.cacheReadTokens) directCacheReadInputTokens += message.data.cacheReadTokens;
+					if (message.data.cacheCreationTokens) directCacheCreationInputTokens += message.data.cacheCreationTokens;
+					if (message.data.currentInputTokens) directInputTokens += message.data.currentInputTokens;
+					if (message.data.currentOutputTokens) directOutputTokens += message.data.currentOutputTokens;
+					recalcAnthropicTotals();
 					
 					// Update status bar immediately
 					updateStatusWithTotals();
@@ -4279,6 +4355,21 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					}
 					break;
 					
+				case 'openUsageStatsModal':
+					showUsageStatsModal();
+					break;
+
+				case 'anthropicUsageStatsUpdate':
+					// Update Router/Bridge usage stats
+					routerCacheHitRate = message.data.cacheHitRate || 0;
+					routerCacheReadInputTokens = message.data.totalCacheReadInputTokens || 0;
+					routerCacheCreationInputTokens = message.data.totalCacheCreationInputTokens || 0;
+					routerInputTokens = message.data.totalInputTokens || 0;
+					routerOutputTokens = message.data.totalOutputTokens || 0;
+					recalcAnthropicTotals();
+					updateStatusWithTotals();
+					break;
+
 				case 'updateTotals':
 					// Update local tracking variables
 					totalCost = message.data.totalCost || 0;
@@ -5429,12 +5520,110 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 		}
 
 		function showSupportModal() {
-			document.getElementById('supportModal').style.display = 'flex';
+		document.getElementById('supportModal').style.display = 'flex';
 		}
 
 		function hideSupportModal() {
-			document.getElementById('supportModal').style.display = 'none';
+		document.getElementById('supportModal').style.display = 'none';
 		}
+
+			function formatTokenCount(n) {
+				if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+				if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+				return String(n);
+			}
+
+			function refreshUsageStatsModal() {
+			const content = document.getElementById('usageStatsContent');
+			if (!content) return;
+
+			const sessionInputTokens = (anthropicTotalInputTokens + anthropicTotalOutputTokens) > 0 ? anthropicTotalInputTokens : totalTokensInput;
+			const sessionOutputTokens = (anthropicTotalInputTokens + anthropicTotalOutputTokens) > 0 ? anthropicTotalOutputTokens : totalTokensOutput;
+			const sessionTotalTokens = sessionInputTokens + sessionOutputTokens;
+			let html = '';
+
+					// Session tokens
+			html += '<div style="margin-bottom: 16px;">';
+					html += '<div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--vscode-foreground);">Session Tokens</div>';
+			html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">';
+			html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Input</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(sessionInputTokens) + '</div></div>';
+			html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Output</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(sessionOutputTokens) + '</div></div>';
+			html += '</div>';
+			html += '<div style="margin-top: 6px; padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Total</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(sessionTotalTokens) + '</div></div>';
+			html += '</div>';
+
+			// Direct Claude response stats
+			if (directInputTokens > 0 || directCacheReadInputTokens > 0 || directCacheCreationInputTokens > 0) {
+						html += '<div style="margin-bottom: 16px;">';
+			 html += '<div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--vscode-foreground);">Direct Response Cache</div>';
+			 const directPromptTotal = directInputTokens + directCacheReadInputTokens;
+			 html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Input</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(directInputTokens) + '</div></div>';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Output</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(directOutputTokens) + '</div></div>';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Cache Read</div><div style="font-size: 14px; font-weight: 600; color: #22c55e;">' + formatTokenCount(directCacheReadInputTokens) + '</div>' + (directPromptTotal > 0 ? '<div style="font-size: 9px; color: #22c55e;">' + (directCacheReadInputTokens / directPromptTotal * 100).toFixed(1) + '% of prompt</div>' : '') + '</div>';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Cache Created</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(directCacheCreationInputTokens) + '</div>' + (directPromptTotal > 0 ? '<div style="font-size: 9px; color: var(--vscode-descriptionForeground);">' + (directCacheCreationInputTokens / directPromptTotal * 100).toFixed(1) + '% of prompt</div>' : '') + '</div>';
+			 html += '</div>';
+			 html += '<div style="margin-top: 6px; text-align: right;"><button onclick="resetDirectCacheStats()" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--vscode-panel-border); background: none; color: var(--vscode-descriptionForeground); cursor: pointer;">Reset</button></div>';
+			 html += '</div>';
+			}
+
+			 // Router/Bridge stats
+			 if (routerInputTokens > 0 || routerCacheReadInputTokens > 0 || routerCacheCreationInputTokens > 0) {
+			  html += '<div style="margin-bottom: 16px;">';
+			 html += '<div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--vscode-foreground);">Router/Bridge Cache</div>';
+			 const routerPromptTotal = routerInputTokens + routerCacheReadInputTokens;
+			 html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Input</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(routerInputTokens) + '</div></div>';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Output</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(routerOutputTokens) + '</div></div>';
+						html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Cache Read</div><div style="font-size: 14px; font-weight: 600; color: #22c55e;">' + formatTokenCount(routerCacheReadInputTokens) + '</div>' + (routerPromptTotal > 0 ? '<div style="font-size: 9px; color: #22c55e;">' + (routerCacheReadInputTokens / routerPromptTotal * 100).toFixed(1) + '% of prompt</div>' : '') + '</div>';
+			 html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Cache Created</div><div style="font-size: 14px; font-weight: 600;">' + formatTokenCount(routerCacheCreationInputTokens) + '</div>' + (routerPromptTotal > 0 ? '<div style="font-size: 9px; color: var(--vscode-descriptionForeground);">' + (routerCacheCreationInputTokens / routerPromptTotal * 100).toFixed(1) + '% of prompt</div>' : '') + '</div>';
+			 html += '</div>';
+			 html += '</div>';
+					}
+
+			// Combined cache hit rate
+					if (anthropicTotalInputTokens > 0 || anthropicTotalCacheReadInputTokens > 0) {
+			 const promptTotal = anthropicTotalInputTokens + anthropicTotalCacheReadInputTokens;
+			 const cachePercent = (anthropicCacheHitRate * 100).toFixed(1);
+			 html += '<div style="margin-bottom: 16px;">';
+			 html += '<div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--vscode-foreground);">Combined Cache Hit Rate</div>';
+			html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;">';
+			 html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Hit Rate</div><div style="font-size: 14px; font-weight: 600; color: #22c55e;">' + cachePercent + '%</div></div>';
+			 html += '<div style="height: 6px; background: rgba(127,127,127,0.2); border-radius: 3px; overflow: hidden;"><div style="height: 100%; width: ' + cachePercent + '%; background: #22c55e; border-radius: 3px;"></div></div>';
+						html += '<div style="display: flex; justify-content: space-between; margin-top: 4px;"><span style="font-size: 9px; color: var(--vscode-descriptionForeground);">Cache Read: ' + formatTokenCount(anthropicTotalCacheReadInputTokens) + '</span><span style="font-size: 9px; color: var(--vscode-descriptionForeground);">Prompt Total: ' + formatTokenCount(promptTotal) + '</span></div>';
+			 html += '</div>';
+			  html += '<div style="margin-top: 6px; padding: 8px 10px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 6px;"><div style="font-size: 10px; color: var(--vscode-descriptionForeground);">Cached Tokens Saved</div><div style="font-size: 14px; font-weight: 600; color: #22c55e;">' + formatTokenCount(anthropicTotalCacheReadInputTokens) + ' tokens</div></div>';
+						html += '</div>';
+					}
+
+					// Request info
+					html += '<div style="padding: 8px 10px; background: var(--vscode-textBlockQuote-background); border-radius: 6px;">';
+					html += '<div style="display: flex; justify-content: space-between;"><span style="font-size: 10px; color: var(--vscode-descriptionForeground);">Requests</span><span style="font-size: 13px; font-weight: 600;">' + requestCount + '</span></div>';
+					if (totalCost > 0) {
+						html += '<div style="display: flex; justify-content: space-between; margin-top: 4px;"><span style="font-size: 10px; color: var(--vscode-descriptionForeground);">Cost</span><span style="font-size: 13px; font-weight: 600;">$' + totalCost.toFixed(4) + '</span></div>';
+					}
+					html += '</div>';
+
+					content.innerHTML = html;
+				}
+
+				function resetDirectCacheStats() {
+					directInputTokens = 0;
+					directOutputTokens = 0;
+					directCacheReadInputTokens = 0;
+					directCacheCreationInputTokens = 0;
+					recalcAnthropicTotals();
+					refreshUsageStatsModal();
+				}
+
+				function showUsageStatsModal() {
+					refreshUsageStatsModal();
+					document.getElementById('usageStatsModal').style.display = 'flex';
+				}
+
+				function hideUsageStatsModal() {
+					document.getElementById('usageStatsModal').style.display = 'none';
+			}
 
 		async function submitSupport() {
 			var type = document.getElementById('supportType').value;
@@ -6499,9 +6688,18 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 					selectModel('default', true);
 				}
 
-				updateOpenCreditsPromo();
-				updateStatusWithTotals();
-			}
+				// Update Router/Bridge usage stats from settings data
+				const anthropicUsageStats = message.data['router.anthropicUsageStats'] || {};
+				routerCacheHitRate = anthropicUsageStats.cacheHitRate || 0;
+				routerCacheReadInputTokens = anthropicUsageStats.totalCacheReadInputTokens || 0;
+				routerCacheCreationInputTokens = anthropicUsageStats.totalCacheCreationInputTokens || 0;
+				routerInputTokens = anthropicUsageStats.totalInputTokens || 0;
+				routerOutputTokens = anthropicUsageStats.totalOutputTokens || 0;
+					recalcAnthropicTotals();
+
+					updateOpenCreditsPromo();
+					updateStatusWithTotals();
+				}
 
 			if (message.type === 'openedExternalUrl') {
 				const modal = document.getElementById('externalUrlModal');
