@@ -74,6 +74,59 @@ reasoning 内容一起传回去。本项目会把这些内容写入本地 cache�
   但这些不是 Anthropic 签名过的 thinking blocks。
 - 这是兼容桥接服务，不是原生 Anthropic endpoint 的替代品。
 
+## 为什么不是通用网关？
+
+ccNexus、LiteLLM、New API、One API 以及类似项目更适合做通用代理和模型网关:
+多 provider 管理、端点轮换、额度控制、仪表盘、虚拟 key、统一 OpenAI 兼容入口等。
+它们解决的是“广覆盖”的问题。
+
+本项目刻意做窄，只解决一个更具体的问题: 让 OpenCode Go 的 DeepSeek V4 可以稳定作为
+Claude Code 后端使用。
+
+| 维度 | 通用转换代理 | 本项目 |
+| --- | --- | --- |
+| 主要目标 | 路由或统一多种 provider/API 格式 | 让 OpenCode Go DeepSeek V4 能在 Claude Code 中使用 |
+| 范围 | 多 provider、多模型、管理功能更全 | 聚焦 Anthropic Messages -> OpenAI chat-completions |
+| DeepSeek V4 `reasoning_content` 回放 | 通常不是核心设计目标 | 核心能力，本地缓存并回放 |
+| Claude Code thinking 显示 | 取决于具体网关和模型路径 | 把 DeepSeek reasoning delta 转成 Claude Code 可显示的 thinking block |
+| 工具调用历史 | 通用 tool schema 转换 | 为 Claude Code 工具调用历史恢复 DeepSeek reasoning |
+| 强制 `tool_choice` | 常见做法是直接转 OpenAI forced tool choice | 针对 DeepSeek/OpenCode Go 做柔化，必要时转成 system 指令 |
+| 部署形态 | 更像完整 gateway，通常带管理功能 | 零依赖 Node.js 本地 bridge |
+
+所以本项目的优势不是“更通用”，而是更贴近 DeepSeek V4 的几个特殊约束:
+
+- **reasoning 回放**: DeepSeek thinking 模式下的工具调用历史可能要求把之前的
+  `reasoning_content` 原样带回。本项目会按 tool call ID、assistant 文本 hash、
+  最近 tool context 三种路径缓存和回放。
+- **更能承受 Claude Code 对话压缩**: 如果 Claude Code 压缩后仍保留近期
+  `tool_use`/`tool_result` 块，bridge 仍有机会从本地 cache 找回对应 reasoning。
+- **可见 thinking**: 流式 DeepSeek `reasoning_content` 会被包装成 Anthropic 兼容
+  `thinking` content block，让 Claude Code 可以显示思考内容。
+- **DeepSeek-aware 扩展字段**: `thinking` 和 `reasoning_effort` 只会发给 DeepSeek
+  模型名，实验性接入其他 chat-completions 模型时不会被 DeepSeek 专用字段污染。
+- **贴合 OpenCode Go 模型 ID**: 默认配置直接使用 OpenCode Go 的 DeepSeek V4 模型 ID，
+  包括 `deepseek-v4-pro[1m]` 和 `deepseek-v4-flash`。
+
+如果你的目标是多 provider 聚合、团队管理、key 轮换或可视化后台，通用网关更合适。
+如果你的核心问题是“Claude Code 无法稳定使用 OpenCode Go DeepSeek V4，尤其是工具调用或
+thinking 历史之后容易出错”，本项目更对口。
+
+## 与 oc-go-cc 的对比
+
+[`oc-go-cc`](https://github.com/samueltuyizere/oc-go-cc) 和 LiteLLM、New API
+这类宽泛网关不太一样，它和本项目更接近: 同样是把 OpenCode Go 接到 Claude Code，
+同样会把 Anthropic Messages 请求转换成 OpenAI 风格 chat-completions 请求。
+
+主要区别是产品重心。如果你想把 OpenCode Go 当成 Claude Code 的完整多模型后端，重视
+模型路由、fallback chain、token 阈值、CLI/后台运行和更广的模型覆盖，`oc-go-cc`
+更合适。
+
+如果你要解决的是 DeepSeek V4 在工具调用、多轮续接或 Claude Code 历史压缩后报
+`reasoning_content must be passed back`，本项目更对症。它同样做 thinking/reasoning
+协议映射，但额外维护持久化的本地 `reasoning_content` cache，并按 tool call ID、
+assistant 文本 hash、最近 tool context 回放。它刻意更窄: 零依赖 Node.js，聚焦
+DeepSeek V4 Pro/Flash，MIT 许可证。
+
 ## 要求
 
 - Node.js 18 或更新版本。
@@ -174,6 +227,95 @@ node server.js --config ./config.json
 CLAUDE_OPENCODE_PROXY_CONFIG=./config.json node server.js
 ```
 
+## 开机自启动
+
+项目内置了用户级自启动脚本。它们不会保存 API key；bridge 仍然从 Claude Code 请求里接收
+OpenCode Go key。
+
+Windows 会优先尝试使用当前用户的计划任务，在用户登录后启动。如果 Task Scheduler
+拒绝注册任务，脚本会自动退回到当前用户的“启动”文件夹快捷方式:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart-windows.ps1
+```
+
+如果你已经知道当前机器上计划任务会被拒绝，可以直接使用“启动”文件夹模式:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart-windows.ps1 -Mode StartupShortcut
+```
+
+在“启动”文件夹模式下，脚本会优先使用 `nodew.exe`。如果当前 Node.js 安装没有
+`nodew.exe`，则使用 `wscript.exe` 加 `scripts/start-hidden-windows.vbs` 隐藏启动，
+让 bridge 在后台运行，不显示控制台窗口。这个模式不会创建托盘图标。
+
+如果你希望它出现在 Windows 右下角通知区域/隐藏图标里，可以使用:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart-windows.ps1 -Mode StartupTray
+```
+
+托盘启动器提供打开 `/health`、把 reasoning cache 裁剪到 `reasoningCacheMaxSizeBytes`
+一半、重启 bridge、退出 bridge 的右键菜单。清理 cache 时会先停止 bridge，修改 cache
+文件后再重启，避免运行中的内存 cache 把裁剪后的文件覆盖回去。重启和清理会优先通过
+只允许本机回环访问的 `/shutdown` 端点让 bridge 自行退出，超时后才会强制停止子进程。
+裁剪动作由
+`scripts/trim-reasoning-cache.js` 执行，所以大 cache 文件会交给 Node.js 解析和写回，
+不会由 PowerShell 直接处理。Windows 托盘图标会优先使用
+`assets/app-icon.ico`，`assets/app-icon.png` 作为源 PNG 保留。托盘菜单会跟随 Windows
+当前应用明暗主题，并在可用时使用较新的 Segoe UI 字体。
+
+取消自启动:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-autostart-windows.ps1
+```
+
+Linux 使用 `systemd --user` 服务:
+
+```bash
+chmod +x ./scripts/*.sh
+./scripts/install-autostart-linux.sh
+systemctl --user status deepseek-v4-opencode-claude-code-bridge.service
+```
+
+取消自启动:
+
+```bash
+./scripts/uninstall-autostart-linux.sh
+```
+
+用户级 systemd 服务通常会在用户会话存在后启动。如果你希望它在开机后、用户未登录时也启动，
+需要手动开启 linger:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+macOS 使用用户级 LaunchAgent:
+
+```bash
+chmod +x ./scripts/*.sh
+./scripts/install-autostart-macos.sh
+```
+
+取消自启动:
+
+```bash
+./scripts/uninstall-autostart-macos.sh
+```
+
+如果要使用非默认配置文件路径，Windows 传 `-ConfigPath`，Linux/macOS 设置 `CONFIG_PATH`:
+
+```powershell
+.\scripts\install-autostart-windows.ps1 -ConfigPath "D:\path\config.json"
+```
+
+```bash
+CONFIG_PATH=/path/to/config.json ./scripts/install-autostart-linux.sh
+CONFIG_PATH=/path/to/config.json ./scripts/install-autostart-macos.sh
+```
+
 ## Claude Code Settings
 
 创建 Claude Code settings 文件，例如 `~/.claude/settings.opencode-proxy.json`。
@@ -193,10 +335,17 @@ CLAUDE_OPENCODE_PROXY_CONFIG=./config.json node server.js
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4-pro[1m]",
     "CLAUDE_CODE_EFFORT_LEVEL": "max"
-  },
-  "model": "deepseek-v4-pro[1m]"
+  }
 }
 ```
+
+上面的示例沿用 DeepSeek 风格配置，通过 `ANTHROPIC_MODEL` 指定主模型。
+如果保留 `ANTHROPIC_MODEL`，那么在 Claude Code 里切换模型通常只对当前对话有效；
+新对话仍会回到 `ANTHROPIC_MODEL` 指定的模型。如果你希望 Claude Code 的模型切换器
+真正控制默认模型映射，请删除 `ANTHROPIC_MODEL`，然后在 Claude Code 的界面或
+`/model` 命令里选择模型。Claude Code 会自己维护 `model` 字段。这样 `sonnet`
+和 `opus` 会映射到 `deepseek-v4-pro[1m]`，`haiku` 和 small/fast 调用会映射到
+`deepseek-v4-flash`。
 
 你可以把这份内容保存成单独的 settings 文件，然后通过 `--settings` 使用；也可以直接
 用同样内容覆盖 Claude Code 默认的 `~/.claude/settings.json`。直接覆盖默认 settings
@@ -238,14 +387,21 @@ Code 会把 `ANTHROPIC_API_KEY` 作为 `x-api-key` 发送；默认情况下 brid
 key 转发给 OpenCode Go。
 
 `CLAUDE_CODE_EFFORT_LEVEL=max` 会让 Claude Code 对所选后端使用最高可用推理努力。
-如果你更希望响应速度快一些，可以降低或删除它。
+如果你更希望响应速度快一些，可以降低或删除它。实际使用中，思考强度不是一个精确可控的旋钮：
+Claude Code 的会话状态、`/effort`、`effortLevel` 和 `CLAUDE_CODE_EFFORT_LEVEL`
+可能互相影响，而 DeepSeek/OpenCode Go 也可能对最终值做归一化。更准确地说，它是
+“请求的思考强度提示”，不是严格保证的后端档位。
 
 当 Claude Code 在请求体里带上 Anthropic 格式的 `thinking` 和
 `output_config.effort` 字段时，bridge 会把它们翻译成 DeepSeek/OpenAI 兼容的
 `thinking` 和 `reasoning_effort`，但只对 DeepSeek 模型名这样做。bridge 不会从
 `config.json` 强行开启 thinking；单次会话里的 `/effort` 仍然由 Claude Code 自己控制。
-为了匹配 DeepSeek V4 的兼容行为，`low` 和 `medium` effort 会按 `high` 发送，
-`xhigh` 会按 `max` 发送。
+根据 DeepSeek 的 thinking mode 文档，思考模式默认开启，Claude Code/OpenCode 这类复杂
+Agent 请求可能会被按 max effort 的思考请求处理。实际使用中，`/effort` 和
+`effortLevel` 会影响 Claude Code 请求的思考强度，但不能保证后端严格按这个档位执行；
+它们也不是唯一的 thinking 开关。如果 Claude Code 没有发送 `thinking` 字段，bridge 会让
+DeepSeek 使用自己的默认行为。为了匹配 DeepSeek V4 的兼容行为，`low` 和 `medium` effort
+会按 `high` 发送，`xhigh` 会按 `max` 发送。
 
 当 DeepSeek 返回 `reasoning_content` 时，bridge 会把它包装成 Anthropic 兼容的
 `thinking` content block，让 Claude Code 可以显示思考内容。同一份 reasoning 也会继续
@@ -261,8 +417,7 @@ key 转发给 OpenCode Go。
     "ANTHROPIC_API_KEY": "sk-opencode-go-key",
     "ANTHROPIC_MODEL": "kimi-k2.6",
     "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-v4-flash"
-  },
-  "model": "kimi-k2.6"
+  }
 }
 ```
 
@@ -293,6 +448,34 @@ curl http://127.0.0.1:8787/health
 ```bash
 curl -H "x-api-key: sk-..." "http://127.0.0.1:8787/health?probe=upstream"
 ```
+
+## 用量统计说明
+
+bridge 会把上游 OpenAI-compatible usage 转成 Claude Code 能理解的
+Anthropic-style usage。DeepSeek/OpenCode Go 可能返回 `prompt_tokens`、
+`completion_tokens`、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`。
+
+bridge 会报告:
+
+- `input_tokens`: 上游的 `prompt_tokens` 或 `input_tokens`。
+- `output_tokens`: 上游的 `completion_tokens` 或 `output_tokens`。
+- `cache_read_input_tokens`: 上游的 `prompt_cache_hit_tokens`，如果存在。
+- `cache_creation_input_tokens`: 上游的 `prompt_cache_miss_tokens`，如果存在。
+
+`cache_creation_input_tokens` 在本项目中是有意保留的兼容性估算。DeepSeek 的
+cache miss 表示这些 token 没有从缓存读取，并会按 cache-miss input 计费；上游
+API 并不会返回“本次实际写入 Anthropic 风格新缓存条目的 token 数”。bridge 会
+把 miss 映射到 Claude Code 的 cache-write 字段，让 `/usage` 能看到 DeepSeek
+请求中的 cache-miss 侧用量。换句话说，在本项目里应把 Claude Code 的
+`cache write` 理解为 DeepSeek/OpenCode Go 的 cache-miss input，而不是权威的
+Anthropic cache creation。
+
+流式请求中，上游 usage 通常在最后一个 SSE chunk 才出现。因此 bridge 会先在
+`message_start` 中发送 `input_tokens: 0`，最后在 `message_delta` 中补充累计 usage。
+
+Claude Code `/usage` 只能作为 token 视角的翻译统计，不等于 OpenCode Go 订阅额度。
+OpenCode Go 的真实用量以 console 为准，因为它按美元额度、模型价格和 cached token
+规则计算。
 
 ## 开发检查
 
@@ -419,3 +602,12 @@ MiniMax M2.7 和 M2.5 在文档中是 Anthropic `/v1/messages` 模型，所以�
   OpenAI 风格 function/tool calling 概念。
 - [OpenAI Chat API Reference](https://developers.openai.com/api/reference/resources/chat) -
   OpenAI 兼容上游常见的 chat-completions 请求和响应结构。
+- [ccNexus](https://github.com/lich0821/ccNexus) - 通用 Claude Code/Codex API
+  网关，包含端点轮换和多格式转换能力。
+- [oc-go-cc](https://github.com/samueltuyizere/oc-go-cc) - 面向 Claude Code 的
+  OpenCode Go 代理，包含模型路由、fallback chain，以及 DeepSeek V4 thinking/
+  reasoning-content 协议映射。
+- [LiteLLM](https://github.com/BerriAI/litellm) - 面向多 LLM provider 的通用
+  AI gateway，提供 OpenAI 兼容接口。
+- [New API](https://github.com/QuantumNous/new-api) - 通用模型聚合与分发网关，
+  支持多种 API 格式互转。

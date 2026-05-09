@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -107,14 +108,24 @@ test("openAiToAnthropic converts text and tool calls", () => {
           },
         },
       ],
-      usage: { prompt_tokens: 10, completion_tokens: 5 },
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        prompt_cache_hit_tokens: 4,
+        prompt_cache_miss_tokens: 6,
+      },
     },
     "deepseek-v4-pro[1m]",
   );
 
   assert.equal(message.id, "chatcmpl_1");
   assert.equal(message.stop_reason, "tool_use");
-  assert.deepEqual(message.usage, { input_tokens: 10, output_tokens: 5 });
+  assert.deepEqual(message.usage, {
+    input_tokens: 10,
+    output_tokens: 5,
+    cache_read_input_tokens: 4,
+    cache_creation_input_tokens: 6,
+  });
   assert.deepEqual(message.content[0], {
     type: "thinking",
     thinking: "reasoning for response",
@@ -127,6 +138,40 @@ test("openAiToAnthropic converts text and tool calls", () => {
     name: "Read",
     input: { file_path: "README.md" },
   });
+});
+
+test("anthropicMessagesToOpenAi keeps user image blocks", () => {
+  const messages = bridge.anthropicMessagesToOpenAi([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "What is in this image?" },
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: "aW1hZ2UtYnl0ZXM=",
+          },
+        },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(messages, [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "What is in this image?" },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+          },
+        },
+      ],
+    },
+  ]);
 });
 
 test("upstreamResponseHeaders keeps only safe response headers", () => {
@@ -199,7 +244,7 @@ test("streamOpenAiAsAnthropic emits message_stop and usage", async () => {
       "utf8",
     );
     yield Buffer.from(
-      'data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n',
+      'data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":3,"completion_tokens":2,"prompt_cache_hit_tokens":1,"prompt_cache_miss_tokens":2}}\n\n',
       "utf8",
     );
     yield Buffer.from("data: [DONE]\n\n", "utf8");
@@ -231,7 +276,10 @@ test("streamOpenAiAsAnthropic emits message_stop and usage", async () => {
   assert.match(output, /event: content_block_delta/);
   assert.match(output, /"text":"OK"/);
   assert.match(output, /event: message_delta/);
+  assert.match(output, /"input_tokens":3/);
   assert.match(output, /"output_tokens":2/);
+  assert.match(output, /"cache_read_input_tokens":1/);
+  assert.match(output, /"cache_creation_input_tokens":2/);
   assert.match(output, /event: message_stop/);
   assert.equal(res.writableEnded, true);
 });
@@ -567,5 +615,160 @@ test("invalid numeric config fails with a clear error", () => {
       process.env.CLAUDE_OPENCODE_PROXY_PORT = originalPort;
     }
     require("../server.js");
+  }
+});
+
+test("Linux autostart service writes unquoted systemd WorkingDirectory", () => {
+  const script = fs.readFileSync(
+    path.join(__dirname, "..", "scripts", "install-autostart-linux.sh"),
+    "utf8",
+  );
+
+  assert.match(script, /WorkingDirectory=\$\(escape_systemd_path "\$REPO_DIR"\)/);
+  assert.doesNotMatch(script, /WorkingDirectory="\$\(escape_systemd_arg "\$REPO_DIR"\)"/);
+});
+
+function runTrimHelper(configPath, ratio = "0.5") {
+  const childEnv = { ...process.env };
+  delete childEnv.CLAUDE_OPENCODE_REASONING_CACHE;
+  delete childEnv.CLAUDE_OPENCODE_REASONING_CACHE_MAX_SIZE_BYTES;
+
+  return spawnSync(
+    process.execPath,
+    [
+      path.join(__dirname, "..", "scripts", "trim-reasoning-cache.js"),
+      "--config",
+      configPath,
+      "--ratio",
+      ratio,
+    ],
+    {
+      encoding: "utf8",
+      env: childEnv,
+    },
+  );
+}
+
+test("trim-reasoning-cache helper trims cache to half of configured max size", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-cache-trim-"));
+  const trimCachePath = path.join(tempDir, "cache.json");
+  const trimConfigPath = path.join(tempDir, "config.json");
+
+  try {
+    fs.writeFileSync(
+      trimConfigPath,
+      JSON.stringify({
+        reasoningCachePath: trimCachePath,
+        reasoningCacheMaxSizeBytes: 2000,
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      trimCachePath,
+      JSON.stringify(
+        {
+          version: 2,
+          updatedAt: Date.now(),
+          toolCallReasoning: {
+            oldest: { reasoning: "x".repeat(500), updatedAt: 1 },
+            newest: { reasoning: "y".repeat(100), updatedAt: 999 },
+          },
+          assistantTextReasoning: {
+            middle: { reasoning: "z".repeat(300), updatedAt: 500 },
+          },
+          toolContextReasoning: {},
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const result = runTrimHelper(trimConfigPath);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, true);
+    assert.ok(output.removedEntries > 0);
+    assert.ok(output.afterSizeBytes <= output.targetSizeBytes);
+
+    const cache = JSON.parse(fs.readFileSync(trimCachePath, "utf8"));
+    assert.equal(cache.toolCallReasoning.oldest, undefined);
+    assert.equal(cache.toolCallReasoning.newest.reasoning, "y".repeat(100));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("trim-reasoning-cache helper succeeds when cache file is missing", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-cache-missing-"));
+  const trimCachePath = path.join(tempDir, "missing-cache.json");
+  const trimConfigPath = path.join(tempDir, "config.json");
+
+  try {
+    fs.writeFileSync(
+      trimConfigPath,
+      JSON.stringify({
+        reasoningCachePath: trimCachePath,
+        reasoningCacheMaxSizeBytes: 900,
+      }),
+      "utf8",
+    );
+
+    const result = runTrimHelper(trimConfigPath);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, true);
+    assert.equal(output.message, "Cache file not found.");
+    assert.equal(output.removedEntries, 0);
+    assert.equal(fs.existsSync(trimCachePath), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("trim-reasoning-cache helper leaves small caches untouched", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-cache-small-"));
+  const trimCachePath = path.join(tempDir, "cache.json");
+  const trimConfigPath = path.join(tempDir, "config.json");
+
+  try {
+    fs.writeFileSync(
+      trimConfigPath,
+      JSON.stringify({
+        reasoningCachePath: trimCachePath,
+        reasoningCacheMaxSizeBytes: 10000,
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      trimCachePath,
+      JSON.stringify(
+        {
+          version: 2,
+          updatedAt: 123,
+          toolCallReasoning: {
+            keep: { reasoning: "small", updatedAt: 1 },
+          },
+          assistantTextReasoning: {},
+          toolContextReasoning: {},
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    const before = fs.readFileSync(trimCachePath, "utf8");
+
+    const result = runTrimHelper(trimConfigPath, "1");
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, true);
+    assert.equal(output.removedEntries, 0);
+    assert.equal(fs.readFileSync(trimCachePath, "utf8"), before);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
