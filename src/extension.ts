@@ -2114,6 +2114,8 @@ class ClaudeChatProvider {
 					type: 'error',
 					data: errorOutput.trim()
 				});
+			} else if (code === 0 && !this._isStoppingCurrentRequest) {
+				this._notifyRequestCompletedIfAway();
 			}
 		});
 
@@ -5734,6 +5736,111 @@ class ClaudeChatProvider {
 		}
 		const visible = maxLength - 3;
 		return `${text.slice(0, Math.ceil(visible / 2))}...${text.slice(-Math.floor(visible / 2))}`;
+	}
+
+	private _notifyRequestCompletedIfAway() {
+		if (this._isChatVisible()) {
+			return;
+		}
+
+		this._showNativeRequestCompletedNotification();
+		vscode.window.showInformationMessage('Claude Code Chat response is complete.', 'Open Chat').then(selection => {
+			if (selection === 'Open Chat') {
+				this.show(vscode.ViewColumn.Two);
+			}
+		});
+	}
+
+	private _isChatVisible(): boolean {
+		if (!vscode.window.state.focused) {
+			return false;
+		}
+		if (this._panel) {
+			return this._panel.visible;
+		}
+		if (this._webviewView) {
+			return this._webviewView.visible;
+		}
+		return false;
+	}
+
+	private _showNativeRequestCompletedNotification() {
+		const title = 'Claude Code Chat';
+		const message = 'Response is complete.';
+
+		try {
+			if (process.platform === 'darwin') {
+				const appleScript = `display notification "${this._escapeAppleScriptString(message)}" with title "${this._escapeAppleScriptString(title)}"`;
+				cp.spawn('osascript', ['-e', appleScript], {
+					detached: true,
+					stdio: 'ignore'
+				}).unref();
+				return;
+			}
+
+			if (process.platform === 'win32') {
+				this._showWindowsToastNotification(title, message);
+				this._showWindowsTrayNotification(title, message);
+			}
+		} catch (error) {
+			console.error('Failed to show native completion notification:', error);
+		}
+	}
+
+	private _showWindowsToastNotification(title: string, message: string) {
+		const toastXml = '<toast><visual><binding template="ToastGeneric"><text>' + this._escapeXml(title) + '</text><text>' + this._escapeXml(message) + '</text></binding></visual></toast>';
+		const script = [
+			'[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
+			'[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
+			`$template = ${this._toPowerShellSingleQuotedString(toastXml)}`,
+			'$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
+			'$xml.LoadXml($template)',
+			'$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)',
+			'$appIds = @("VisualStudioCode", "Microsoft.VisualStudioCode", "Claude Code Chat", "Windows PowerShell")',
+			'foreach ($appId in $appIds) { try { $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId); $notifier.Show($toast); break } catch {} }'
+		].join('; ');
+		cp.spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+			detached: true,
+			stdio: 'ignore',
+			windowsHide: true
+		}).unref();
+	}
+
+	private _showWindowsTrayNotification(title: string, message: string) {
+		const script = [
+					'Add-Type -AssemblyName System.Windows.Forms',
+					'Add-Type -AssemblyName System.Drawing',
+					'$notify = New-Object System.Windows.Forms.NotifyIcon',
+					'$notify.Icon = [System.Drawing.SystemIcons]::Information',
+					'$notify.Visible = $true',
+					`$notify.BalloonTipTitle = ${this._toPowerShellSingleQuotedString(title)}`,
+					`$notify.BalloonTipText = ${this._toPowerShellSingleQuotedString(message)}`,
+					'$notify.ShowBalloonTip(5000)',
+					'Start-Sleep -Seconds 6',
+					'$notify.Dispose()'
+		].join('; ');
+		cp.spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Sta', '-Command', script], {
+			detached: true,
+			stdio: 'ignore',
+			windowsHide: true
+		}).unref();
+	}
+
+	private _escapeAppleScriptString(value: string): string {
+		return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+	}
+
+	private _toPowerShellSingleQuotedString(value: string): string {
+		return `'${value.replace(/'/g, "''")}'`;
+	}
+
+	private _escapeXml(value: string): string {
+		return value
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&apos;');
 	}
 
 	private async _openFileInEditor(filePath: string) {

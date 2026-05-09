@@ -4,11 +4,11 @@
     "port": 9999
   },
   "upstream": {
-    "baseUrl": "https://ai.mxou.cn/v1"
+    "baseUrl": "http://proxy.fakestcode.xin/v1"
   },
   "models": [
-    "gpt-5.4[1m]",
-    "gpt-5.4-mini"
+    "gpt-5.5[1m]",
+    "gpt-5.5"
   ],
   "reasoningContent": "auto",
   "reasoningCachePath": "C:\\Users\\solosw\\.claude\\deepseek-v4-opencode-claude-code-bridge-reasoning-cache.json",
