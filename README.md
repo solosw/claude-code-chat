@@ -27,6 +27,7 @@ Claude Code Chat 把 Claude Code 的常用能力搬进 VS Code：
 - 支持恢复之前的会话
 - 支持检查点回滚，方便试错和恢复代码状态
 - 可查看最新修改并快速接受或拒绝变更
+- `Edit`、`Write`、`MultiEdit` 的文件变更记录会稳定同步到聊天区和最新修改列表
 
 ### 3. 权限系统
 - 图形化权限管理
@@ -54,6 +55,7 @@ Claude Code Chat 把 Claude Code 的常用能力搬进 VS Code：
 - 支持自定义环境变量
 - 支持环境变量预设
 - 支持本地 Router 模式
+- 支持 OpenAI Bridge Profiles，并在未填写时默认将 `Reasoning Cache Path` 指向当前工作区下的 `.claude/reasoning-cache.json`
 
 ## 安装要求
 
@@ -173,7 +175,7 @@ npm run watch
 
 ## 版本
 
-当前版本：`2.0.6`
+当前版本：`2.0.26`
 
 ## 许可证
 

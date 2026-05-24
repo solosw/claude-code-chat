@@ -1305,28 +1305,52 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			return { added, removed };
 		}
 
+		function renderLatestChangeHistory(item) {
+			const history = Array.isArray(item.history) ? item.history : [];
+			if (history.length <= 1) return '';
+			return '<div class="latest-change-history">' + history.map((entry, index) => {
+				const entryMeta = [entry.timeLabel, entry.toolName].filter(Boolean).join(' · ');
+				return '<div class="latest-change-history-row">' +
+					'<div class="latest-change-history-main">' +
+						'<div class="latest-change-history-title">Change ' + (index + 1) + '</div>' +
+						'<div class="latest-change-history-meta">' + escapeHtml(entryMeta) + '</div>' +
+					'</div>' +
+					'<button class="latest-change-action" data-action="history-diff" data-change-key="' + escapeHtml(item.changeKey || '') + '" data-history-index="' + index + '">Open Diff</button>' +
+				'</div>';
+			}).join('') + '</div>';
+		}
+
 		function renderLatestChangeItem(item) {
 			const icon = getLatestChangeStatusIcon(item.status);
 			const revertedClass = item.isReverted ? ' reverted' : '';
 			const changeKey = escapeHtml(item.changeKey || '');
 			const meta = [item.timeLabel, item.directoryLabel].filter(Boolean).join(' · ');
 			const stats = getLatestChangeLineStats(item);
+			const history = Array.isArray(item.history) ? item.history : [];
 			const statsHtml = (stats.added || stats.removed)
 				? '<div class="latest-change-stats"><span class="latest-change-added">+' + stats.added + '</span><span class="latest-change-removed">-' + stats.removed + '</span></div>'
 				: '';
+			const historyLabel = history.length > 1 ? ' · ' + history.length + ' changes' : '';
+			const historyToggle = history.length > 1
+				? '<button class="latest-change-action" data-action="toggle-history" data-change-key="' + changeKey + '">History</button>'
+				: '';
 			return (
 				'<div class="latest-change-item' + revertedClass + '" data-change-key="' + changeKey + '">' +
-					'<div class="latest-change-icon ' + escapeHtml(item.status) + '">' + icon + '</div>' +
-					'<div class="latest-change-main">' +
-						'<div class="latest-change-name" title="' + escapeHtml(item.fileName) + '">' + escapeHtml(item.fileName) + '</div>' +
-						'<div class="latest-change-meta" title="' + escapeHtml(meta) + '">' + escapeHtml(meta) + '</div>' +
+					'<div class="latest-change-summary">' +
+						'<div class="latest-change-icon ' + escapeHtml(item.status) + '">' + icon + '</div>' +
+						'<div class="latest-change-main">' +
+							'<div class="latest-change-name" title="' + escapeHtml(item.fileName) + '">' + escapeHtml(item.fileName) + '</div>' +
+							'<div class="latest-change-meta" title="' + escapeHtml(meta + historyLabel) + '">' + escapeHtml(meta + historyLabel) + '</div>' +
+						'</div>' +
+						statsHtml +
+						'<div class="latest-change-actions">' +
+							historyToggle +
+							'<button class="latest-change-action" data-action="diff" data-change-key="' + changeKey + '">Open</button>' +
+							'<button class="latest-change-action accept" data-action="accept" data-change-key="' + changeKey + '">✓</button>' +
+							'<button class="latest-change-action reject" data-action="reject" data-change-key="' + changeKey + '">✕</button>' +
+						'</div>' +
 					'</div>' +
-					statsHtml +
-					'<div class="latest-change-actions">' +
-						'<button class="latest-change-action" data-action="diff" data-change-key="' + changeKey + '">Open</button>' +
-						'<button class="latest-change-action accept" data-action="accept" data-change-key="' + changeKey + '">✓</button>' +
-						'<button class="latest-change-action reject" data-action="reject" data-change-key="' + changeKey + '">✕</button>' +
-					'</div>' +
+					renderLatestChangeHistory(item) +
 				'</div>'
 			);
 		}
@@ -1343,6 +1367,25 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 			const item = findLatestChangeItemByKey(changeKey);
 			if (!item) return;
 			vscode.postMessage({ type: 'openLatestChangeDiff', item: item });
+		}
+
+		function openLatestChangeHistoryDiff(changeKey, historyIndex) {
+			const item = findLatestChangeItemByKey(changeKey);
+			if (!item || !Array.isArray(item.history)) return;
+			const entry = item.history[historyIndex];
+			if (!entry) return;
+			vscode.postMessage({
+				type: 'openDiff',
+				filePath: item.absolutePath,
+				oldContent: entry.oldContent,
+				newContent: entry.newContent
+			});
+		}
+
+		function toggleLatestChangeHistory(changeKey) {
+			const item = document.querySelector('.latest-change-item[data-change-key="' + changeKey.replace(/"/g, '&quot;') + '"]');
+			if (!item) return;
+			item.classList.toggle('history-expanded');
 		}
 
 		function rejectLatestChangeByKey(changeKey) {
@@ -6206,6 +6249,15 @@ const getScript = (isTelemetryEnabled: boolean, opencreditsApiUrl: string = 'htt
 				}
 				if (action === 'reject') {
 					rejectLatestChangeByKey(changeKey);
+					return;
+				}
+				if (action === 'toggle-history') {
+					toggleLatestChangeHistory(changeKey);
+					return;
+				}
+				if (action === 'history-diff') {
+					const historyIndex = Number(target.getAttribute('data-history-index') || '-1');
+					openLatestChangeHistoryDiff(changeKey, historyIndex);
 					return;
 				}
 				openLatestChangeDiffByKey(changeKey);

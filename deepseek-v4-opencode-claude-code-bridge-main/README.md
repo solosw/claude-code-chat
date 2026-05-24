@@ -1,159 +1,181 @@
+<div align="center">
+
+<img src="assets/app-icon.png" alt="DeepSeek V4 OpenCode Claude Code Bridge" width="128" />
+
 # DeepSeek V4 OpenCode Claude Code Bridge
 
-Languages: [English](README.md) | [简体中文](README.zh-CN.md)
+**Drop-in local bridge that lets Claude Code drive OpenCode Go's DeepSeek V4 — with full `reasoning_content` replay for thinking-mode tool calls.**
 
-DeepSeek V4 OpenCode Claude Code Bridge is a local compatibility bridge for using
-OpenCode Go's DeepSeek V4 series as a Claude Code backend.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A518-339933?style=flat-square&logo=node.js&logoColor=white)](package.json)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue?style=flat-square)](#-requirements)
+[![Zero deps](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)](package.json)
+[![Version](https://img.shields.io/github/package-json/v/superheroYu/deepseek-v4-opencode-claude-code-bridge?style=flat-square&label=version)](package.json)
+[![GitHub stars](https://img.shields.io/github/stars/superheroYu/deepseek-v4-opencode-claude-code-bridge?style=flat-square&logo=github)](https://github.com/superheroYu/deepseek-v4-opencode-claude-code-bridge)
 
-Claude Code sends Anthropic `/v1/messages` requests. OpenCode Go exposes
-DeepSeek V4 through OpenAI-compatible `/v1/chat/completions`. This proxy
-translates between the two protocols and preserves the DeepSeek V4
-`reasoning_content` history required for thinking-mode tool calls.
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-Other OpenCode Go models that use `/v1/chat/completions` may also work, but
-they are best-effort/experimental because their tool-calling behavior can differ
-from DeepSeek V4.
+</div>
 
-## What It Does
+---
 
-Request path:
+Claude Code speaks Anthropic `/v1/messages`. OpenCode Go exposes DeepSeek V4 through OpenAI-compatible `/v1/chat/completions`. This bridge translates between the two protocols **and** preserves the DeepSeek `reasoning_content` history required for thinking-mode tool calls.
 
-```text
-Claude Code
-  -> local proxy /v1/messages
-  -> OpenCode Go /v1/chat/completions
-  -> an OpenAI-compatible model
+> [!NOTE]
+> Other OpenCode Go `/v1/chat/completions` models may also work, but they are best-effort/experimental — their tool-calling behavior can differ from DeepSeek V4.
+
+---
+
+## 📑 Table of Contents
+
+- [🔄 How It Works](#-how-it-works)
+- [✅ Current Scope](#-current-scope)
+- [🎯 Why Not a General Gateway?](#-why-not-a-general-gateway)
+- [⚖️ Compared With oc-go-cc](#%EF%B8%8F-compared-with-oc-go-cc)
+- [📋 Requirements](#-requirements)
+- [⚙️ Configuration](#%EF%B8%8F-configuration)
+- [🚀 Start](#-start)
+- [🔧 Autostart](#-autostart)
+- [🛠️ Claude Code Settings](#%EF%B8%8F-claude-code-settings)
+- [🩺 Health Check](#-health-check)
+- [📊 Usage Reporting](#-usage-reporting)
+- [🧪 Development Checks](#-development-checks)
+- [🐛 Troubleshooting](#-troubleshooting)
+- [🔒 Security Notes](#-security-notes)
+- [📜 Conversation Compaction](#-conversation-compaction)
+- [💡 Why This Exists](#-why-this-exists)
+- [📚 OpenCode Go Notes](#-opencode-go-notes)
+- [🔗 References](#-references)
+
+---
+
+## 🔄 How It Works
+
+```mermaid
+flowchart LR
+    A[💻 Claude Code]
+    B[🌉 Local Bridge<br/>:8787]
+    C[☁️ OpenCode Go<br/>/v1/chat/completions]
+    D[🧠 DeepSeek V4<br/>+ other models]
+    Cache[(💾 reasoning_content<br/>cache)]
+
+    A -->|Anthropic<br/>/v1/messages| B
+    B -->|OpenAI-compatible<br/>chat completions| C
+    C --> D
+    D -.->|stream| C
+    C -.->|stream + reasoning| B
+    B -.->|SSE thinking + content| A
+    B <-->|replay on tool history| Cache
 ```
 
-The proxy translates:
+The bridge translates:
 
-```text
-Anthropic Messages API
-messages[].content text/tool_use/tool_result
-tools[{ name, description, input_schema }]
-tool_choice
-SSE message_* and content_block_* events
-```
+| Anthropic Messages API | ⇄ | OpenAI-compatible Chat Completions |
+| --- | :---: | --- |
+| `messages[].content` (text / `tool_use` / `tool_result`) | → | `messages` with `role=user/assistant/tool` |
+| `tools[{ name, description, input_schema }]` | → | `tools[{ type: "function", function: { name, description, parameters } }]` |
+| `tool_choice` | → | softened to system instruction when needed |
+| SSE `message_*` / `content_block_*` events | → | streaming chat completion chunks |
 
-into:
+For DeepSeek V4, it also preserves `reasoning_content` for thinking-mode tool calls. DeepSeek requires reasoning content to be sent back in later tool-call history. The bridge stores it in a local cache so continued Claude Code sessions do not fail with `reasoning_content must be passed back`.
 
-```text
-OpenAI-compatible Chat Completions
-messages role=user/assistant/tool
-tools[{ type: "function", function: { name, description, parameters } }]
-tool_calls
-streaming chat completion chunks
-```
+---
 
-For DeepSeek V4, it also preserves `reasoning_content` for thinking-mode tool
-calls. DeepSeek requires that reasoning content be sent back in later tool-call
-history. The proxy stores it in a local cache so continued Claude Code sessions
-do not fail with `reasoning_content must be passed back`.
+## ✅ Current Scope
 
-## Current Scope
+<table>
+<tr>
+<th width="50%">✅ Supported</th>
+<th width="50%">❌ Not Targeted</th>
+</tr>
+<tr>
+<td valign="top">
 
-Supported:
+- Claude Code `/v1/messages` non-streaming + streaming
+- Text content
+- Claude Code tool calls and tool results
+- OpenAI-compatible function calling
+- DeepSeek V4 `reasoning_content` replay for tool-call history
+- **Verified**: OpenCode Go DeepSeek V4 Pro & Flash
+- **Experimental**: other OpenCode Go `/v1/chat/completions` models
+- Windows, Linux, macOS (Node.js)
 
-- Claude Code `/v1/messages` non-streaming and streaming requests.
-- Text content.
-- Claude Code tool calls and tool results.
-- OpenAI-compatible function calling.
-- DeepSeek V4 `reasoning_content` replay for tool-call history.
-- Verified target: OpenCode Go DeepSeek V4 Pro and Flash.
-- Experimental target: other OpenCode Go `/v1/chat/completions` models, subject
-  to each model/provider's function-calling support.
-- Windows, Linux, and macOS with Node.js.
+</td>
+<td valign="top">
 
-Not a full Anthropic API implementation:
+- Image, audio, prompt caching, Anthropic beta fields
+- Forced `tool_choice` (softened to system instruction)
+- DeepSeek reasoning replay for non-DeepSeek models (off by default)
+- Anthropic-signed thinking blocks (empty `signature` is used)
+- Full Anthropic API parity — this is a **compatibility bridge**
 
-- Image, audio, prompt caching, and every Anthropic beta field are not targeted.
-- `tool_choice` forced modes are converted to system instructions because some
-  OpenCode Go upstream models reject forced `tool_choice` values.
-- DeepSeek `reasoning_content` replay is enabled by default only for DeepSeek
-  model names. Other models receive standard OpenAI-style chat messages.
-- Thinking blocks emitted by the bridge use empty `signature` values. Claude
-  Code accepts these on the local proxy path, but they are not Anthropic-signed
-  thinking blocks.
-- This is a compatibility bridge, not a replacement for a native Anthropic
-  endpoint.
+</td>
+</tr>
+</table>
 
-## Why Not a General Gateway?
+---
 
-General-purpose proxy projects such as ccNexus, LiteLLM, New API, One API, and
-similar routers are useful when you need multi-provider management, endpoint
-rotation, quota control, dashboards, virtual keys, or a unified OpenAI-compatible
-gateway. They are broader tools.
+## 🎯 Why Not a General Gateway?
 
-This project is intentionally narrower. It focuses on the specific protocol
-edge cases needed to run OpenCode Go DeepSeek V4 as a Claude Code backend.
+General-purpose proxies (ccNexus, LiteLLM, New API, One API, …) are useful when you need multi-provider management, endpoint rotation, quota control, dashboards, virtual keys, or a unified OpenAI-compatible gateway. They are broader tools.
 
-| Area | General conversion gateways | This bridge |
+This project is intentionally narrower — it solves the specific protocol edge cases needed to run **OpenCode Go DeepSeek V4 as a Claude Code backend**.
+
+| Area | General conversion gateways | **This bridge** |
 | --- | --- | --- |
-| Primary goal | Route or normalize many providers and API formats | Make OpenCode Go DeepSeek V4 usable inside Claude Code |
-| Scope | Broad multi-provider gateway behavior | Focused Anthropic Messages -> OpenAI chat-completions bridge |
-| DeepSeek V4 `reasoning_content` replay | Not usually the central design goal | Core feature with local cache and replay |
-| Claude Code thinking display | Depends on the gateway and model path | Converts DeepSeek reasoning deltas into Anthropic-compatible thinking blocks |
-| Tool-call history | Generic tool schema conversion | Preserves/reconstructs DeepSeek reasoning for Claude Code tool-call history |
-| Forced `tool_choice` | Often translated directly to OpenAI forced tool choice | Softened for DeepSeek/OpenCode Go compatibility when needed |
-| Deployment | Often a full gateway with management features | Single zero-dependency Node.js local bridge |
+| 🎯 Primary goal | Route or normalize many providers and API formats | Make OpenCode Go DeepSeek V4 usable inside Claude Code |
+| 📐 Scope | Broad multi-provider gateway behavior | Focused Anthropic Messages → OpenAI chat-completions bridge |
+| 🧠 DeepSeek V4 `reasoning_content` replay | Not usually the central design goal | **Core feature** — local cache + replay |
+| 💭 Claude Code thinking display | Depends on the gateway and model path | Converts DeepSeek reasoning deltas → Anthropic-compatible thinking blocks |
+| 🔧 Tool-call history | Generic tool schema conversion | Preserves/reconstructs DeepSeek reasoning for Claude Code tool-call history |
+| 🔀 Forced `tool_choice` | Often translated directly to OpenAI forced tool choice | Softened for DeepSeek/OpenCode Go compatibility when needed |
+| 📦 Deployment | Often a full gateway with management features | Single **zero-dependency** Node.js local bridge |
 
-The practical advantage is not that this bridge is more universal. It is that it
-handles DeepSeek V4's less common requirements:
+The practical advantage is not that this bridge is more universal — it's that it handles DeepSeek V4's less common requirements:
 
-- **Reasoning replay**: DeepSeek thinking-mode tool-call history may require
-  previous `reasoning_content` to be sent back. The bridge caches and replays it
-  by tool call ID, assistant text hash, and recent tool context.
-- **Claude Code compaction survival**: when Claude Code keeps recent tool-call
-  blocks across compaction, the bridge can still recover matching DeepSeek
-  reasoning from the local cache.
-- **Visible thinking**: streaming DeepSeek `reasoning_content` is exposed to
-  Claude Code as `thinking` content blocks so the UI can show it.
-- **DeepSeek-aware extensions**: `thinking` and `reasoning_effort` are only sent
-  to DeepSeek model names, so experimental non-DeepSeek chat-completions models
-  are not polluted with DeepSeek-specific fields.
-- **OpenCode Go model IDs**: the default configuration follows OpenCode Go's
-  DeepSeek V4 model IDs, including `deepseek-v4-pro[1m]` and
-  `deepseek-v4-flash`.
+- **🔁 Reasoning replay** — DeepSeek thinking-mode tool-call history may require previous `reasoning_content` to be sent back. The bridge caches and replays it by tool call ID, assistant text hash, and recent tool context.
+- **🗜️ Claude Code compaction survival** — when Claude Code keeps recent tool-call blocks across compaction, the bridge can still recover matching DeepSeek reasoning from the local cache.
+- **👀 Visible thinking** — streaming DeepSeek `reasoning_content` is exposed to Claude Code as `thinking` content blocks so the UI can show it.
+- **🧩 DeepSeek-aware extensions** — `thinking` and `reasoning_effort` are only sent to DeepSeek model names, so experimental non-DeepSeek chat-completions models are not polluted with DeepSeek-specific fields.
+- **🏷️ OpenCode Go model IDs** — the default config follows OpenCode Go's DeepSeek V4 model IDs, including `deepseek-v4-pro[1m]` and `deepseek-v4-flash`.
 
-Use a general gateway if you mainly need provider aggregation, team management,
-key rotation, or a dashboard. Use this bridge if your main problem is: "Claude
-Code cannot reliably use OpenCode Go DeepSeek V4, especially after tool calls or
-thinking-mode history."
+> [!TIP]
+> Use a **general gateway** if you mainly need provider aggregation, team management, key rotation, or a dashboard.
+> Use **this bridge** if your main problem is: *"Claude Code cannot reliably use OpenCode Go DeepSeek V4, especially after tool calls or thinking-mode history."*
 
-## Compared With oc-go-cc
+---
 
-[`oc-go-cc`](https://github.com/samueltuyizere/oc-go-cc) is closer to this
-project than broad gateways such as LiteLLM or New API: it is also an OpenCode
-Go -> Claude Code proxy, and it also translates Anthropic Messages requests to
-OpenAI-style chat-completions requests.
+## ⚖️ Compared With oc-go-cc
 
-The main difference is focus. Choose `oc-go-cc` if you want a broader OpenCode
-Go backend manager for Claude Code: model routing, fallback chains, token
-thresholds, packaged CLI/background operation, and wider model coverage.
+[`oc-go-cc`](https://github.com/samueltuyizere/oc-go-cc) is closer to this project than broad gateways: it is also an OpenCode Go → Claude Code proxy, and it also translates Anthropic Messages requests to OpenAI-style chat-completions requests.
 
-Choose this bridge if your concrete failure is DeepSeek V4's
-`reasoning_content must be passed back` behavior after tool calls, continued
-sessions, or Claude Code history compaction. It performs the same core
-thinking/reasoning protocol mapping, but adds a persistent local
-`reasoning_content` cache and replay by tool call ID, assistant text hash, and
-recent tool context. It is narrower by design: zero-dependency Node.js, focused
-on DeepSeek V4 Pro/Flash, and MIT licensed.
+The main difference is **focus**:
 
-## Requirements
+| | [`oc-go-cc`](https://github.com/samueltuyizere/oc-go-cc) | **This bridge** |
+| --- | --- | --- |
+| 🎯 Best for | Broader OpenCode Go backend manager — model routing, fallback chains, token thresholds, packaged CLI/background operation, wider model coverage | Solving DeepSeek V4's `reasoning_content must be passed back` after tool calls, continued sessions, or Claude Code history compaction |
+| 💾 Reasoning cache | Core thinking/reasoning protocol mapping | Persistent local `reasoning_content` cache + replay by tool call ID, assistant text hash, and recent tool context |
+| 📦 Footprint | Wider feature surface | Zero-dependency Node.js, focused on DeepSeek V4 Pro/Flash, MIT licensed |
 
-- Node.js 18 or newer.
-- An OpenCode Go API key.
-- Claude Code.
+---
 
-No npm dependencies are required.
+## 📋 Requirements
 
-## Configuration
+- **Node.js** 18 or newer
+- An **OpenCode Go API key**
+- **Claude Code**
 
-The repository includes a ready-to-use `config.json`. It does not contain any
-API key. Edit it only if you need a different port, upstream URL, model list, or
-reasoning cache path.
+> [!NOTE]
+> No npm dependencies are required.
 
-Default config:
+---
+
+## ⚙️ Configuration
+
+The repository includes a ready-to-use `config.json`. It does **not** contain any API key. Edit it only if you need a different port, upstream URL, model list, or reasoning cache path.
+
+<details>
+<summary><b>Default <code>config.json</code></b></summary>
 
 ```json
 {
@@ -178,116 +200,102 @@ Default config:
 }
 ```
 
-Fields:
+</details>
 
-- `listen.host`: local address to bind. Keep `127.0.0.1` unless you really want
-  LAN access.
-- `listen.port`: local proxy port.
-- `upstream.baseUrl`: OpenAI-compatible upstream base URL. For OpenCode Go,
-  use `https://opencode.ai/zen/go/v1`.
-- `models`: model IDs returned by the local `/v1/models` endpoint. Include the
-  OpenAI-compatible upstream models you want Claude Code to see.
-- `reasoningContent`: `auto`, `always`, or `never`. Keep `auto` for OpenCode Go.
-  It replays DeepSeek reasoning history only for DeepSeek model names.
-- `reasoningCacheMaxEntries`: maximum entries to keep in each reasoning cache
-  bucket. The default `0` disables count-based trimming.
-- `reasoningCacheMaxAgeMs`: maximum age for a cache entry since its last use.
-  The default is 30 days. Set `0` to disable age-based trimming.
-- `reasoningCacheMaxSizeBytes`: maximum serialized cache file size. The default
-  is 200 MB. When the cache exceeds this size, the oldest entries are removed.
-- `reasoningCachePath`: local DeepSeek reasoning cache path.
-- `requestBodyLimitBytes`: maximum accepted request body size. The default is
-  100 MB.
-- `upstreamTimeoutMs`: maximum time to wait for an upstream OpenCode Go request
-  before aborting it. The default is 10 minutes.
+**Fields**
 
-The default model uses the `deepseek-v4-pro[1m]` 1M-context variant. If your
-OpenCode Go plan does not include that variant, replace every
-`deepseek-v4-pro[1m]` value in `config.json` and Claude Code settings with
-`deepseek-v4-pro`.
+| Field | Description |
+| --- | --- |
+| `listen.host` | Local address to bind. Keep `127.0.0.1` unless you really want LAN access. |
+| `listen.port` | Local proxy port. |
+| `upstream.baseUrl` | OpenAI-compatible upstream base URL. For OpenCode Go: `https://opencode.ai/zen/go/v1`. |
+| `models` | Model IDs returned by the local `/v1/models` endpoint. |
+| `reasoningContent` | `auto`, `always`, or `never`. Keep `auto` for OpenCode Go — replays DeepSeek reasoning only for DeepSeek model names. |
+| `reasoningCacheMaxEntries` | Max entries per reasoning cache bucket. `0` disables count-based trimming. |
+| `reasoningCacheMaxAgeMs` | Max age since last use. Default `30 days`. `0` disables age-based trimming. |
+| `reasoningCacheMaxSizeBytes` | Max serialized cache file size. Default `200 MB`. Oldest entries are removed first. |
+| `reasoningCachePath` | Local DeepSeek reasoning cache path. |
+| `requestBodyLimitBytes` | Max accepted request body size. Default `100 MB`. |
+| `upstreamTimeoutMs` | Max wait for an upstream OpenCode Go request. Default `10 minutes`. |
 
-## Start
+> [!IMPORTANT]
+> The default model uses the `deepseek-v4-pro[1m]` 1M-context variant. If your OpenCode Go plan does not include it, replace every `deepseek-v4-pro[1m]` value in `config.json` and Claude Code settings with `deepseek-v4-pro`.
 
-Start the local bridge.
+---
 
-Windows PowerShell:
+## 🚀 Start
+
+<details open>
+<summary><b>Windows PowerShell</b></summary>
 
 ```powershell
 npm start
 ```
 
-Windows cmd:
+</details>
+
+<details>
+<summary><b>Windows cmd</b></summary>
 
 ```cmd
 start.cmd
 ```
 
-Linux/macOS:
+</details>
+
+<details>
+<summary><b>Linux / macOS</b></summary>
 
 ```bash
 chmod +x ./start.sh
 ./start.sh
 ```
 
-By default, the bridge receives the OpenCode Go key from Claude Code's
-`ANTHROPIC_API_KEY` request header. Keep the OpenCode Go key in Claude Code
-settings, not in `config.json`.
+</details>
+
+> [!TIP]
+> By default, the bridge receives the OpenCode Go key from Claude Code's `ANTHROPIC_API_KEY` request header. Keep the OpenCode Go key in **Claude Code settings**, not in `config.json`.
 
 You can also pass a config path explicitly:
 
 ```bash
 node server.js --config ./config.json
-```
-
-or:
-
-```bash
+# or
 CLAUDE_OPENCODE_PROXY_CONFIG=./config.json node server.js
 ```
 
-## Autostart
+---
 
-The repository includes user-level autostart helpers. They do not store API
-keys; the bridge still receives the OpenCode Go key from Claude Code requests.
+## 🔧 Autostart
 
-Windows first tries to use a per-user Scheduled Task that starts when the
-current user logs in. If Task Scheduler rejects the registration, the script
-falls back to a shortcut in the current user's Startup folder:
+The repository includes user-level autostart helpers. They do **not** store API keys; the bridge still receives the OpenCode Go key from Claude Code requests.
+
+<details>
+<summary><b>🪟 Windows — Scheduled Task / Startup folder / Tray</b></summary>
+
+<br/>
+
+Windows first tries to use a per-user Scheduled Task that starts when the current user logs in. If Task Scheduler rejects the registration, the script falls back to a shortcut in the current user's Startup folder:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart-windows.ps1
 ```
 
-If you already know Task Scheduler is blocked on your machine, use the Startup
-folder mode directly:
+If you already know Task Scheduler is blocked on your machine, use the Startup folder mode directly:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart-windows.ps1 -Mode StartupShortcut
 ```
 
-In Startup folder mode, the script uses `nodew.exe` when available. If Node.js
-does not provide `nodew.exe`, it uses `wscript.exe` plus
-`scripts/start-hidden-windows.vbs` so the bridge runs in the background without a
-console window. This does not create a tray icon.
+In Startup folder mode, the script uses `nodew.exe` when available. If Node.js does not provide `nodew.exe`, it uses `wscript.exe` plus `scripts/start-hidden-windows.vbs` so the bridge runs in the background without a console window. This does not create a tray icon.
 
-If you prefer a tray icon in the Windows notification area, use:
+If you prefer a tray icon in the Windows notification area:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart-windows.ps1 -Mode StartupTray
 ```
 
-The tray launcher provides a small menu for opening `/health`, trimming the
-reasoning cache to half of `reasoningCacheMaxSizeBytes`, restarting the bridge,
-or exiting it. Cache trimming stops the bridge first, edits the cache file, then
-starts the bridge again so the in-memory cache cannot overwrite the trimmed file.
-Restart and trim actions first ask the local bridge to shut down through its
-loopback-only `/shutdown` endpoint and only force-stop the child process if it
-does not exit in time.
-The trim action is handled by `scripts/trim-reasoning-cache.js`, so large cache
-files are parsed and written by Node.js instead of PowerShell.
-Its Windows tray icon is loaded from `assets/app-icon.ico` with
-`assets/app-icon.png` kept as the source PNG. The tray menu follows the current
-Windows app light/dark theme and uses a modern Segoe UI font when available.
+The tray launcher provides a small menu for opening `/health`, trimming the reasoning cache to half of `reasoningCacheMaxSizeBytes`, restarting the bridge, or exiting it. Cache trimming stops the bridge first, edits the cache file, then starts the bridge again so the in-memory cache cannot overwrite the trimmed file. Restart and trim actions first ask the local bridge to shut down through its loopback-only `/shutdown` endpoint and only force-stop the child process if it does not exit in time. The trim action is handled by `scripts/trim-reasoning-cache.js`, so large cache files are parsed and written by Node.js instead of PowerShell. Its Windows tray icon is loaded from `assets/app-icon.ico` with `assets/app-icon.png` kept as the source PNG. The tray menu follows the current Windows app light/dark theme and uses a modern Segoe UI font when available.
 
 Disable it with:
 
@@ -295,7 +303,12 @@ Disable it with:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-autostart-windows.ps1
 ```
 
-Linux uses a `systemd --user` service:
+</details>
+
+<details>
+<summary><b>🐧 Linux — <code>systemd --user</code></b></summary>
+
+<br/>
 
 ```bash
 chmod +x ./scripts/*.sh
@@ -309,14 +322,18 @@ Disable it with:
 ./scripts/uninstall-autostart-linux.sh
 ```
 
-A user service normally starts after the user session exists. If you need it to
-start at boot before login, enable lingering manually:
+A user service normally starts after the user session exists. If you need it to start at boot before login, enable lingering manually:
 
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
 
-macOS uses a user LaunchAgent:
+</details>
+
+<details>
+<summary><b>🍎 macOS — user LaunchAgent</b></summary>
+
+<br/>
 
 ```bash
 chmod +x ./scripts/*.sh
@@ -329,8 +346,9 @@ Disable it with:
 ./scripts/uninstall-autostart-macos.sh
 ```
 
-To use a non-default config path, pass `-ConfigPath` on Windows or set
-`CONFIG_PATH` on Linux/macOS:
+</details>
+
+To use a non-default config path, pass `-ConfigPath` on Windows or set `CONFIG_PATH` on Linux/macOS:
 
 ```powershell
 .\scripts\install-autostart-windows.ps1 -ConfigPath "D:\path\config.json"
@@ -341,10 +359,11 @@ CONFIG_PATH=/path/to/config.json ./scripts/install-autostart-linux.sh
 CONFIG_PATH=/path/to/config.json ./scripts/install-autostart-macos.sh
 ```
 
-## Claude Code Settings
+---
 
-Create a Claude Code settings file, for example
-`~/.claude/settings.opencode-proxy.json`.
+## 🛠️ Claude Code Settings
+
+Create a Claude Code settings file, for example `~/.claude/settings.opencode-proxy.json`:
 
 ```json
 {
@@ -365,82 +384,57 @@ Create a Claude Code settings file, for example
 }
 ```
 
-The example above follows the DeepSeek-style setup and sets the main model with
-`ANTHROPIC_MODEL`. If you keep `ANTHROPIC_MODEL`, switching models in Claude
-Code is only a per-conversation choice; new conversations will still fall back
-to the model named by `ANTHROPIC_MODEL`. If you want Claude Code's model
-switcher to control the default model mapping, remove `ANTHROPIC_MODEL` and
-choose the model from Claude Code's UI or `/model` command. Claude Code will
-maintain its own `model` field. Then `sonnet` and `opus` map to
-`deepseek-v4-pro[1m]`, while `haiku` and small/fast calls map to
-`deepseek-v4-flash`.
+The example above follows the DeepSeek-style setup and sets the main model with `ANTHROPIC_MODEL`. If you keep `ANTHROPIC_MODEL`, switching models in Claude Code is only a per-conversation choice; new conversations still fall back to the model named by `ANTHROPIC_MODEL`. If you want Claude Code's model switcher to control the default model mapping, remove `ANTHROPIC_MODEL` and choose the model from Claude Code's UI or `/model` command. Claude Code maintains its own `model` field. Then `sonnet` and `opus` map to `deepseek-v4-pro[1m]`, while `haiku` and small/fast calls map to `deepseek-v4-flash`.
 
-You can either keep this as a separate settings file and pass it with
-`--settings`, or replace Claude Code's default `~/.claude/settings.json` with
-the same content. Replacing the default settings is often simpler because it
-avoids merging with older `ANTHROPIC_AUTH_TOKEN` or direct-provider settings.
+You can either keep this as a separate settings file and pass it with `--settings`, or replace Claude Code's default `~/.claude/settings.json` with the same content. Replacing the default settings is often simpler because it avoids merging with older `ANTHROPIC_AUTH_TOKEN` or direct-provider settings.
 
-Run Claude Code with:
+**Run Claude Code:**
 
-Windows PowerShell:
+<details open>
+<summary><b>Windows PowerShell</b></summary>
 
 ```powershell
 claude --settings "$HOME\.claude\settings.opencode-proxy.json"
 ```
 
-Linux/macOS:
+</details>
+
+<details>
+<summary><b>Linux / macOS</b></summary>
 
 ```bash
 claude --settings ~/.claude/settings.opencode-proxy.json
 ```
 
-For a quick test:
+</details>
 
-Windows PowerShell:
+**Quick test:**
 
 ```powershell
+# Windows PowerShell
 claude -p "Reply OK only" --max-turns 1 --settings "$HOME\.claude\settings.opencode-proxy.json"
 ```
 
-Linux/macOS:
-
 ```bash
+# Linux / macOS
 claude -p "Reply OK only" --max-turns 1 --settings ~/.claude/settings.opencode-proxy.json
 ```
 
-If Claude Code reports `Settings file not found` on Windows, pass the absolute
-path instead of `~`, for example `C:\Users\<you>\.claude\settings.opencode-proxy.json`.
+> [!WARNING]
+> If Claude Code reports `Settings file not found` on Windows, pass the **absolute path** instead of `~`, e.g. `C:\Users\<you>\.claude\settings.opencode-proxy.json`.
 
-Use `ANTHROPIC_API_KEY`, not `ANTHROPIC_AUTH_TOKEN`, for the local bridge.
-Claude Code sends `ANTHROPIC_API_KEY` as `x-api-key`; by default the bridge
-forwards that key to OpenCode Go.
+> [!IMPORTANT]
+> Use `ANTHROPIC_API_KEY`, **not** `ANTHROPIC_AUTH_TOKEN`, for the local bridge. Claude Code sends `ANTHROPIC_API_KEY` as `x-api-key`; by default the bridge forwards that key to OpenCode Go.
 
-`CLAUDE_CODE_EFFORT_LEVEL=max` asks Claude Code to use the highest available
-reasoning effort with the selected backend. You can lower or remove it if you
-prefer faster responses. In practice, reasoning effort is not a precise control:
-Claude Code session state, `/effort`, `effortLevel`, and
-`CLAUDE_CODE_EFFORT_LEVEL` can interact, and DeepSeek/OpenCode Go may normalize
-the final value. Treat it as a requested effort hint rather than an exact knob.
+`CLAUDE_CODE_EFFORT_LEVEL=max` asks Claude Code to use the highest available reasoning effort with the selected backend. You can lower or remove it if you prefer faster responses. In practice, reasoning effort is not a precise control: Claude Code session state, `/effort`, `effortLevel`, and `CLAUDE_CODE_EFFORT_LEVEL` can interact, and DeepSeek/OpenCode Go may normalize the final value. Treat it as a requested effort hint rather than an exact knob.
 
-When Claude Code includes Anthropic-format `thinking` and `output_config.effort`
-fields in a request, the bridge translates them to DeepSeek/OpenAI-compatible
-`thinking` and `reasoning_effort` for DeepSeek model names only. The bridge does
-not force thinking from `config.json`; per-session `/effort` remains owned by
-Claude Code. According to DeepSeek's thinking-mode guide, thinking is enabled
-by default, and complex agent requests such as Claude Code/OpenCode may be
-treated as max-effort thinking requests. In practice, `/effort` and
-`effortLevel` influence the effort requested from Claude Code, but they do not
-guarantee exact backend behavior. If Claude Code does not send a `thinking`
-field, the bridge lets DeepSeek use its own default behavior. For DeepSeek V4
-compatibility, `low` and `medium` effort are sent as `high`, while `xhigh` is
-sent as `max`.
+When Claude Code includes Anthropic-format `thinking` and `output_config.effort` fields in a request, the bridge translates them to DeepSeek/OpenAI-compatible `thinking` and `reasoning_effort` for DeepSeek model names only. The bridge does not force thinking from `config.json`; per-session `/effort` remains owned by Claude Code. According to DeepSeek's thinking-mode guide, thinking is enabled by default, and complex agent requests such as Claude Code/OpenCode may be treated as max-effort thinking requests. In practice, `/effort` and `effortLevel` influence the effort requested from Claude Code, but they do not guarantee exact backend behavior. If Claude Code does not send a `thinking` field, the bridge lets DeepSeek use its own default behavior. For DeepSeek V4 compatibility, `low` and `medium` effort are sent as `high`, while `xhigh` is sent as `max`.
 
-When DeepSeek returns `reasoning_content`, the bridge emits Anthropic-compatible
-`thinking` content blocks so Claude Code can display thinking output. The same
-reasoning is also cached for later DeepSeek tool-call history replay.
+When DeepSeek returns `reasoning_content`, the bridge emits Anthropic-compatible `thinking` content blocks so Claude Code can display thinking output. The same reasoning is also cached for later DeepSeek tool-call history replay.
 
-To experiment with another `/v1/chat/completions` Go model, add its model ID to
-`config.json`, then change the Claude Code model fields, for example:
+**Experimenting with another model**
+
+To try another `/v1/chat/completions` Go model, add its model ID to `config.json`, then change the Claude Code model fields:
 
 ```json
 {
@@ -453,11 +447,11 @@ To experiment with another `/v1/chat/completions` Go model, add its model ID to
 }
 ```
 
-Use the raw Go API model IDs, such as `deepseek-v4-pro[1m]` or `kimi-k2.6`, not the
-OpenCode app prefix `opencode-go/<model-id>`. Non-DeepSeek models should be
-considered best-effort until their function-calling behavior has been tested.
+Use the raw Go API model IDs, such as `deepseek-v4-pro[1m]` or `kimi-k2.6`, **not** the OpenCode app prefix `opencode-go/<model-id>`. Non-DeepSeek models should be considered best-effort until their function-calling behavior has been tested.
 
-## Health Check
+---
+
+## 🩺 Health Check
 
 ```bash
 curl http://127.0.0.1:8787/health
@@ -474,155 +468,153 @@ Expected shape:
 }
 ```
 
-To verify the upstream OpenCode Go endpoint as well, pass your OpenCode Go key
-and add `?probe=upstream`:
+To verify the upstream OpenCode Go endpoint as well, pass your OpenCode Go key and add `?probe=upstream`:
 
 ```bash
 curl -H "x-api-key: sk-..." "http://127.0.0.1:8787/health?probe=upstream"
 ```
 
-## Usage Reporting
+---
 
-The bridge maps upstream OpenAI-compatible usage into Anthropic-style usage for
-Claude Code. DeepSeek/OpenCode Go may return `prompt_tokens`,
-`completion_tokens`, `prompt_cache_hit_tokens`, and
-`prompt_cache_miss_tokens`.
+## 📊 Usage Reporting
 
-The bridge reports:
+The bridge maps upstream OpenAI-compatible usage into Anthropic-style usage for Claude Code. DeepSeek/OpenCode Go may return `prompt_tokens`, `completion_tokens`, `prompt_cache_hit_tokens`, and `prompt_cache_miss_tokens`.
 
-- `input_tokens`: upstream `prompt_tokens` or `input_tokens`.
-- `output_tokens`: upstream `completion_tokens` or `output_tokens`.
-- `cache_read_input_tokens`: upstream `prompt_cache_hit_tokens`, when present.
-- `cache_creation_input_tokens`: upstream `prompt_cache_miss_tokens`, when present.
+| Anthropic field (reported to Claude Code) | Source (upstream OpenCode Go) |
+| --- | --- |
+| `input_tokens` | `prompt_tokens` or `input_tokens` |
+| `output_tokens` | `completion_tokens` or `output_tokens` |
+| `cache_read_input_tokens` | `prompt_cache_hit_tokens` (when present) |
+| `cache_creation_input_tokens` | `prompt_cache_miss_tokens` (when present) |
 
-`cache_creation_input_tokens` is intentionally a compatibility estimate in this
-project. DeepSeek cache misses mean tokens were not read from cache and are
-billed as cache-miss input; the upstream API does not report the exact number of
-tokens written into a new Anthropic-style cache entry. The bridge maps misses to
-Claude Code's cache-write field so `/usage` can show the DeepSeek cache-miss
-side of the request. In other words, read Claude Code's `cache write` value as
-DeepSeek/OpenCode Go cache-miss input, not as authoritative Anthropic cache
-creation.
+> [!NOTE]
+> `cache_creation_input_tokens` is intentionally a compatibility estimate. DeepSeek cache misses mean tokens were not read from cache and are billed as cache-miss input; the upstream API does not report the exact number of tokens written into a new Anthropic-style cache entry. The bridge maps misses to Claude Code's cache-write field so `/usage` can show the DeepSeek cache-miss side of the request. Read Claude Code's `cache write` value as **DeepSeek/OpenCode Go cache-miss input**, not as authoritative Anthropic cache creation.
 
-For streaming requests, upstream usage normally arrives in the final SSE chunk.
-The bridge therefore sends `input_tokens: 0` in `message_start` and sends final
-cumulative usage in `message_delta`.
+For streaming requests, upstream usage normally arrives in the final SSE chunk. The bridge therefore sends `input_tokens: 0` in `message_start` and sends final cumulative usage in `message_delta`.
 
-Claude Code `/usage` is only a translated token view. It is not the same as
-OpenCode Go subscription usage, which is based on dollar-value limits,
-model-specific pricing, and cached-token accounting. Use the OpenCode Go
-console as the source of truth for remaining quota.
+> [!TIP]
+> Claude Code `/usage` is only a translated token view. It is **not** the same as OpenCode Go subscription usage, which is based on dollar-value limits, model-specific pricing, and cached-token accounting. Use the **OpenCode Go console** as the source of truth for remaining quota.
 
-## Development Checks
+---
+
+## 🧪 Development Checks
 
 ```bash
 node --check server.js
 node --test
 ```
 
-## Troubleshooting
+---
 
-- `reasoning_content must be passed back`: keep the reasoning cache file, restart
-  the bridge with the same cache path, and avoid trimming old entries too
-  aggressively. If the conversation history still contains old DeepSeek tool
-  calls but the cache was deleted, the bridge can only send a compatibility
-  placeholder for missing reasoning. That avoids a hard request failure but may
-  reduce continuation quality; start a fresh Claude Code session when possible.
-- Reasoning cache is trimmed unexpectedly: by default, entries unused for 30
-  days expire and the serialized cache is capped at 200 MB. Increase
-  `reasoningCacheMaxAgeMs` or `reasoningCacheMaxSizeBytes`, or set either value
-  to `0` to disable that dimension.
-- `401` or `403` from OpenCode Go: verify that Claude Code settings use
-  `ANTHROPIC_API_KEY` with your OpenCode Go key. Do not use
-  `ANTHROPIC_AUTH_TOKEN` for this bridge, and remove conflicting global Claude
-  auth settings.
-- Claude Code retries until timeout: check that the bridge is running on
-  `http://127.0.0.1:8787/health`, then use
-  `/health?probe=upstream` with `x-api-key` to test OpenCode Go. Increase
-  `upstreamTimeoutMs` only if the upstream probe is healthy but slow.
-- Thinking is not visible: make sure Claude Code is using a DeepSeek model and
-  that the upstream response includes `reasoning_content`. Simple prompts may
-  produce no visible thinking. Non-DeepSeek models do not receive the DeepSeek
-  thinking extensions.
-- `Settings file not found` on Windows: pass an absolute path such as
-  `"$HOME\.claude\settings.opencode-proxy.json"` instead of `~/.claude/...`.
-- Port already in use: stop the existing bridge process or change `listen.port`
-  in `config.json` and update `ANTHROPIC_BASE_URL` in Claude Code settings.
+## 🐛 Troubleshooting
 
-## Security Notes
+<details>
+<summary><b><code>reasoning_content must be passed back</code></b></summary>
 
-- Keep the proxy bound to `127.0.0.1` unless you understand the risk.
-- Do not put API keys in `config.json`.
-- The reasoning cache may contain model reasoning traces. Treat it as private
-  session state.
-- If you delete the reasoning cache, continuing old Claude Code conversations
-  that used DeepSeek tool calls may fall back to a compatibility placeholder.
+Keep the reasoning cache file, restart the bridge with the same cache path, and avoid trimming old entries too aggressively. If the conversation history still contains old DeepSeek tool calls but the cache was deleted, the bridge can only send a compatibility placeholder for missing reasoning. That avoids a hard request failure but may reduce continuation quality; start a fresh Claude Code session when possible.
 
-## Conversation Compaction
+</details>
 
-Claude Code may compact long conversations. This proxy cannot recover
-DeepSeek's original `reasoning_content` from Claude Code's compacted summary,
-because Claude Code does not store that DeepSeek-specific field.
+<details>
+<summary><b>Reasoning cache trimmed unexpectedly</b></summary>
 
-The cache is designed to cover the cases that can still be recovered:
+By default, entries unused for 30 days expire and the serialized cache is capped at 200 MB. Increase `reasoningCacheMaxAgeMs` or `reasoningCacheMaxSizeBytes`, or set either value to `0` to disable that dimension.
 
-- If compaction removes old tool-call blocks and keeps only a text summary, no
-  DeepSeek reasoning replay is needed for those removed blocks.
-- If compaction keeps recent `tool_use` and `tool_result` blocks with their
-  original tool call IDs, the proxy can replay cached reasoning for them.
-- If the cache was deleted, manually trimmed, or created by a different proxy instance,
-  old DeepSeek tool-call history may fall back to a compatibility placeholder.
+</details>
 
-For long-running work, keep the reasoning cache enabled and size the cache
-limits for your expected session lifetime. The proxy cannot know about Claude
-Code conversations that are not currently being sent to it, so entries that
-expire by age, size, or count may not be recoverable later.
+<details>
+<summary><b><code>401</code> or <code>403</code> from OpenCode Go</b></summary>
 
-Cache files written by v0.2.1 and newer use schema version 2 with per-entry
-timestamps. Older bridge versions can still start with that file, but they will
-ignore v2 cache entries.
+Verify that Claude Code settings use `ANTHROPIC_API_KEY` with your OpenCode Go key. Do not use `ANTHROPIC_AUTH_TOKEN` for this bridge, and remove conflicting global Claude auth settings.
 
-## Why This Exists
+</details>
 
-OpenCode Go exposes many models through `/v1/chat/completions`, including GLM,
-Kimi, DeepSeek V4, MiMo, and Qwen models. Claude Code expects an
-Anthropic-compatible `/v1/messages` protocol. The mismatch means these models
-can be called through OpenCode Go but cannot always be used directly as full
-Claude Code agent backends.
+<details>
+<summary><b>Claude Code retries until timeout</b></summary>
+
+Check that the bridge is running on `http://127.0.0.1:8787/health`, then use `/health?probe=upstream` with `x-api-key` to test OpenCode Go. Increase `upstreamTimeoutMs` only if the upstream probe is healthy but slow.
+
+</details>
+
+<details>
+<summary><b>Thinking is not visible</b></summary>
+
+Make sure Claude Code is using a DeepSeek model and that the upstream response includes `reasoning_content`. Simple prompts may produce no visible thinking. Non-DeepSeek models do not receive the DeepSeek thinking extensions.
+
+</details>
+
+<details>
+<summary><b><code>Settings file not found</code> on Windows</b></summary>
+
+Pass an absolute path such as `"$HOME\.claude\settings.opencode-proxy.json"` instead of `~/.claude/...`.
+
+</details>
+
+<details>
+<summary><b>Port already in use</b></summary>
+
+Stop the existing bridge process or change `listen.port` in `config.json` and update `ANTHROPIC_BASE_URL` in Claude Code settings.
+
+</details>
+
+---
+
+## 🔒 Security Notes
+
+> [!CAUTION]
+> - Keep the proxy bound to `127.0.0.1` unless you understand the risk.
+> - Do **not** put API keys in `config.json`.
+> - The reasoning cache may contain model reasoning traces. Treat it as **private session state**.
+> - If you delete the reasoning cache, continuing old Claude Code conversations that used DeepSeek tool calls may fall back to a compatibility placeholder.
+
+---
+
+## 📜 Conversation Compaction
+
+Claude Code may compact long conversations. This proxy cannot recover DeepSeek's original `reasoning_content` from Claude Code's compacted summary, because Claude Code does not store that DeepSeek-specific field.
+
+The cache is designed to cover the cases that **can** still be recovered:
+
+- ✅ If compaction removes old tool-call blocks and keeps only a text summary, no DeepSeek reasoning replay is needed for those removed blocks.
+- ✅ If compaction keeps recent `tool_use` and `tool_result` blocks with their original tool call IDs, the proxy can replay cached reasoning for them.
+- ⚠️ If the cache was deleted, manually trimmed, or created by a different proxy instance, old DeepSeek tool-call history may fall back to a compatibility placeholder.
+
+For long-running work, keep the reasoning cache enabled and size the cache limits for your expected session lifetime. The proxy cannot know about Claude Code conversations that are not currently being sent to it, so entries that expire by age, size, or count may not be recoverable later.
+
+> [!NOTE]
+> Cache files written by v0.2.1 and newer use **schema version 2** with per-entry timestamps. Older bridge versions can still start with that file, but they will ignore v2 cache entries.
+
+---
+
+## 💡 Why This Exists
+
+OpenCode Go exposes many models through `/v1/chat/completions`, including GLM, Kimi, DeepSeek V4, MiMo, and Qwen models. Claude Code expects an Anthropic-compatible `/v1/messages` protocol. The mismatch means these models can be called through OpenCode Go but cannot always be used directly as full Claude Code agent backends.
 
 This proxy bridges that protocol mismatch:
 
-- Anthropic tool schema becomes OpenAI function schema.
-- OpenAI `tool_calls` become Anthropic `tool_use` blocks.
-- Claude `tool_result` blocks become OpenAI `tool` messages.
-- DeepSeek `reasoning_content` is cached and replayed when DeepSeek tool-call
-  history is sent back.
+- 🔧 Anthropic tool schema → OpenAI function schema
+- 🔄 OpenAI `tool_calls` → Anthropic `tool_use` blocks
+- 📥 Claude `tool_result` blocks → OpenAI `tool` messages
+- 🧠 DeepSeek `reasoning_content` cached and replayed when DeepSeek tool-call history is sent back
 
-The goal is practical compatibility for Claude Code plus DeepSeek V4 on OpenCode
-Go, with a best-effort path for other chat-completions models. This is not a
-universal gateway for every model provider.
+The goal is practical compatibility for Claude Code + DeepSeek V4 on OpenCode Go, with a best-effort path for other chat-completions models. This is **not** a universal gateway for every model provider.
 
-## OpenCode Go Notes
+---
 
-As of the OpenCode Go documentation, these Go models use
-`/v1/chat/completions` and an OpenAI-compatible or similar chat-completions
-interface:
+## 📚 OpenCode Go Notes
 
-- `glm-5.1`
-- `glm-5`
-- `kimi-k2.6`
-- `kimi-k2.5`
-- `deepseek-v4-pro[1m]`
-- `deepseek-v4-flash`
-- `mimo-v2-pro`
-- `mimo-v2-omni`
-- `mimo-v2.5-pro`
-- `mimo-v2.5`
-- `qwen3.6-plus`
-- `qwen3.5-plus`
+As of the OpenCode Go documentation, these Go models use `/v1/chat/completions` and an OpenAI-compatible or similar chat-completions interface:
 
-MiniMax M2.7 and M2.5 are documented as Anthropic `/v1/messages` models, so
-they usually do not need this proxy for Claude Code.
+| Family | Models |
+| --- | --- |
+| 🧠 DeepSeek | `deepseek-v4-pro[1m]`, `deepseek-v4-flash` |
+| 🌌 GLM | `glm-5.1`, `glm-5` |
+| 🌙 Kimi | `kimi-k2.6`, `kimi-k2.5` |
+| 🎭 MiMo | `mimo-v2-pro`, `mimo-v2-omni`, `mimo-v2.5-pro`, `mimo-v2.5` |
+| 🐉 Qwen | `qwen3.6-plus`, `qwen3.5-plus` |
+
+> [!NOTE]
+> MiniMax M2.7 and M2.5 are documented as Anthropic `/v1/messages` models, so they usually do not need this proxy for Claude Code.
 
 To try an experimental non-DeepSeek model, add it to `config.json`:
 
@@ -637,29 +629,28 @@ To try an experimental non-DeepSeek model, add it to `config.json`:
 }
 ```
 
-## References
+---
 
-- [OpenCode Go documentation](https://opencode.ai/docs/zh-cn/go/) - model IDs,
-  API endpoints, and AI SDK provider notes for OpenCode Go.
-- [DeepSeek API documentation](https://api-docs.deepseek.com/) - official
-  DeepSeek API overview.
-- [DeepSeek thinking mode guide](https://api-docs.deepseek.com/guides/thinking_mode) -
-  `reasoning_content` behavior and thinking-mode tool-call history requirements.
-- [DeepSeek tool calls guide](https://api-docs.deepseek.com/zh-cn/guides/tool_calls) -
-  DeepSeek function/tool calling behavior.
-- [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages) -
-  the `/v1/messages` protocol shape expected by Claude-compatible clients.
-- [OpenAI function calling guide](https://developers.openai.com/api/docs/guides/function-calling) -
-  OpenAI-style function/tool calling concepts.
-- [OpenAI Chat API reference](https://developers.openai.com/api/reference/resources/chat) -
-  the chat-completions-style request and response shape used by OpenAI-compatible
-  upstreams.
-- [ccNexus](https://github.com/lich0821/ccNexus) - a general Claude Code/Codex
-  API gateway with endpoint rotation and multi-format conversion.
-- [oc-go-cc](https://github.com/samueltuyizere/oc-go-cc) - an OpenCode Go
-  proxy for Claude Code with model routing, fallback chains, and DeepSeek V4
-  thinking/reasoning-content protocol mapping.
-- [LiteLLM](https://github.com/BerriAI/litellm) - a general AI gateway for many
-  LLM providers using OpenAI-compatible interfaces.
-- [New API](https://github.com/QuantumNous/new-api) - a general model
-  aggregation and distribution gateway with cross-format conversion.
+## 🔗 References
+
+- 📘 [OpenCode Go documentation](https://opencode.ai/docs/zh-cn/go/) — model IDs, API endpoints, and AI SDK provider notes for OpenCode Go.
+- 📗 [DeepSeek API documentation](https://api-docs.deepseek.com/) — official DeepSeek API overview.
+- 🧠 [DeepSeek thinking mode guide](https://api-docs.deepseek.com/guides/thinking_mode) — `reasoning_content` behavior and thinking-mode tool-call history requirements.
+- 🔧 [DeepSeek tool calls guide](https://api-docs.deepseek.com/zh-cn/guides/tool_calls) — DeepSeek function/tool calling behavior.
+- 🤖 [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages) — the `/v1/messages` protocol shape expected by Claude-compatible clients.
+- ⚙️ [OpenAI function calling guide](https://developers.openai.com/api/docs/guides/function-calling) — OpenAI-style function/tool calling concepts.
+- 📡 [OpenAI Chat API reference](https://developers.openai.com/api/reference/resources/chat) — the chat-completions-style request and response shape used by OpenAI-compatible upstreams.
+- 🌉 [ccNexus](https://github.com/lich0821/ccNexus) — a general Claude Code/Codex API gateway with endpoint rotation and multi-format conversion.
+- 🌉 [oc-go-cc](https://github.com/samueltuyizere/oc-go-cc) — an OpenCode Go proxy for Claude Code with model routing, fallback chains, and DeepSeek V4 thinking/reasoning-content protocol mapping.
+- 🌉 [LiteLLM](https://github.com/BerriAI/litellm) — a general AI gateway for many LLM providers using OpenAI-compatible interfaces.
+- 🌉 [New API](https://github.com/QuantumNous/new-api) — a general model aggregation and distribution gateway with cross-format conversion.
+
+---
+
+<div align="center">
+
+**Made with ❤️ for the DeepSeek V4 + Claude Code workflow**
+
+[⬆ Back to top](#deepseek-v4-opencode-claude-code-bridge)
+
+</div>

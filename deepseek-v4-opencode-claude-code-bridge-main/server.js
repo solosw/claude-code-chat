@@ -556,48 +556,10 @@ function stringifyToolResultContent(content) {
     .map((block) => {
       if (!block) return "";
       if (block.type === "text") return block.text || "";
-      if (block.type === "image") {
-        const src = block.source || {};
-        return `[Image: ${src.media_type || "image"}]`;
-      }
       return JSON.stringify(block);
     })
     .filter(Boolean)
     .join("\n");
-}
-
-function imageBlockToOpenAi(block) {
-  if (!block || block.type !== "image" || !block.source) return null;
-  if (block.source.type !== "base64") return null;
-  const mediaType = block.source.media_type || "image/png";
-  const data = typeof block.source.data === "string" ? block.source.data : "";
-  if (!data) return null;
-  return {
-    type: "image_url",
-    image_url: {
-      url: `data:${mediaType};base64,${data}`,
-    },
-  };
-}
-
-function userBlockToOpenAi(block) {
-  if (!block || typeof block !== "object") return null;
-  if (block.type === "text" && typeof block.text === "string") {
-    return { type: "text", text: block.text };
-  }
-  if (block.type === "image") {
-    return imageBlockToOpenAi(block);
-  }
-  return null;
-}
-
-function buildUserContent(blocks) {
-  const parts = (Array.isArray(blocks) ? blocks : [])
-    .map(userBlockToOpenAi)
-    .filter(Boolean);
-  if (!parts.length) return "";
-  if (parts.length === 1 && parts[0].type === "text") return parts[0].text;
-  return parts;
 }
 
 function systemToOpenAi(system) {
@@ -643,19 +605,24 @@ function anthropicMessagesToOpenAi(messages, includeReasoningContent) {
     const toolUses = blocks.filter((block) => block && block.type === "tool_use");
 
     if (msg.role === "user") {
-      if (!toolResults.length) {
+      if (toolResults.length) {
+        for (const result of toolResults) {
+          if (currentUserTurnHadToolCall) currentToolContext.push(toolResultSignature(result));
+          out.push({
+            role: "tool",
+            tool_call_id: result.tool_use_id || result.id || "call_unknown",
+            content: stringifyToolResultContent(result.content),
+          });
+        }
+        if (text) {
+          currentUserTurnHadToolCall = false;
+          currentToolContext = [];
+          out.push({ role: "user", content: text });
+        }
+      } else {
         currentUserTurnHadToolCall = false;
         currentToolContext = [];
-      }
-      const userContent = buildUserContent(blocks);
-      if (userContent) out.push({ role: "user", content: userContent });
-      for (const result of toolResults) {
-        if (currentUserTurnHadToolCall) currentToolContext.push(toolResultSignature(result));
-        out.push({
-          role: "tool",
-          tool_call_id: result.tool_use_id || result.id || "call_unknown",
-          content: stringifyToolResultContent(result.content),
-        });
+        if (text) out.push({ role: "user", content: text });
       }
       continue;
     }
@@ -694,6 +661,125 @@ function anthropicMessagesToOpenAi(messages, includeReasoningContent) {
     }
 
     out.push({ role: msg.role, content: text });
+  }
+
+  return sanitizeOpenAiToolMessageSequence(coalesceAdjacentAssistantToolCalls(out));
+}
+
+function mergeAssistantContent(left, right) {
+  const parts = [];
+  if (typeof left === "string" && left) parts.push(left);
+  if (typeof right === "string" && right) parts.push(right);
+  return parts.length ? parts.join("\n") : null;
+}
+
+function coalesceAdjacentAssistantToolCalls(messages) {
+  const out = [];
+
+  for (const msg of messages) {
+    const prev = out[out.length - 1];
+    if (
+      prev &&
+      msg &&
+      prev.role === "assistant" &&
+      msg.role === "assistant" &&
+      Array.isArray(prev.tool_calls) &&
+      prev.tool_calls.length &&
+      Array.isArray(msg.tool_calls) &&
+      msg.tool_calls.length
+    ) {
+      prev.content = mergeAssistantContent(prev.content, msg.content);
+      prev.tool_calls.push(...msg.tool_calls);
+      if (msg.reasoning_content) {
+        prev.reasoning_content = [prev.reasoning_content, msg.reasoning_content]
+          .filter(Boolean)
+          .join("\n");
+      }
+      continue;
+    }
+
+    out.push(msg);
+  }
+
+  return out;
+}
+
+function assistantWithoutToolCalls(message) {
+  if (!message || message.role !== "assistant") return null;
+  const out = { ...message };
+  delete out.tool_calls;
+  if (out.content === null || out.content === undefined || out.content === "") {
+    return null;
+  }
+  return out;
+}
+
+function orphanToolMessageToUser(message) {
+  if (!message || message.role !== "tool") return null;
+  const id = message.tool_call_id || "unknown";
+  const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content || "");
+  return {
+    role: "user",
+    content: `Tool result without a matching tool call (${id}):\n${content}`,
+  };
+}
+
+function sanitizeOpenAiToolMessageSequence(messages) {
+  const out = [];
+
+  for (let i = 0; i < messages.length; i += 1) {
+    const message = messages[i];
+    const toolCalls = Array.isArray(message && message.tool_calls) ? message.tool_calls : [];
+
+    if (message && message.role === "assistant" && toolCalls.length) {
+      const toolMessages = [];
+      let j = i + 1;
+      while (j < messages.length && messages[j] && messages[j].role === "tool") {
+        toolMessages.push(messages[j]);
+        j += 1;
+      }
+
+      if (!toolMessages.length && j === messages.length) {
+        out.push(message);
+        continue;
+      }
+
+      const expectedIds = new Set(toolCalls.map((call) => call && call.id).filter(Boolean));
+      const toolById = new Map();
+      const orphanTools = [];
+      for (const toolMessage of toolMessages) {
+        const id = toolMessage.tool_call_id;
+        if (expectedIds.has(id) && !toolById.has(id)) {
+          toolById.set(id, toolMessage);
+        } else {
+          orphanTools.push(toolMessage);
+        }
+      }
+
+      const fulfilledCalls = toolCalls.filter((call) => call && toolById.has(call.id));
+      if (fulfilledCalls.length) {
+        out.push({ ...message, tool_calls: fulfilledCalls });
+        for (const call of fulfilledCalls) out.push(toolById.get(call.id));
+      } else {
+        const fallback = assistantWithoutToolCalls(message);
+        if (fallback) out.push(fallback);
+      }
+
+      for (const orphan of orphanTools) {
+        const userMessage = orphanToolMessageToUser(orphan);
+        if (userMessage) out.push(userMessage);
+      }
+      i = j - 1;
+      continue;
+    }
+
+    if (message && message.role === "tool") {
+      const userMessage = orphanToolMessageToUser(message);
+      if (userMessage) out.push(userMessage);
+      continue;
+    }
+
+    out.push(message);
   }
 
   return out;
@@ -889,6 +975,28 @@ function normalizeUpstreamError(error, upstreamContext) {
   return error;
 }
 
+function payloadDebugSummary(payload) {
+  const messages = Array.isArray(payload && payload.messages) ? payload.messages : [];
+  return {
+    model: payload && payload.model,
+    stream: Boolean(payload && payload.stream),
+    message_count: messages.length,
+    messages: messages.map((message, index) => {
+      const toolCalls = Array.isArray(message && message.tool_calls) ? message.tool_calls : [];
+      const summary = {
+        index,
+        role: message && message.role,
+      };
+      if (message && message.name) summary.name = message.name;
+      if (message && message.tool_call_id) summary.tool_call_id = message.tool_call_id;
+      if (toolCalls.length) {
+        summary.tool_call_ids = toolCalls.map((call) => call && call.id).filter(Boolean);
+      }
+      return summary;
+    }),
+  };
+}
+
 function isLoopbackAddress(address) {
   const normalized = String(address || "").replace(/^::ffff:/, "");
   return normalized === "::1" || normalized === "localhost" || normalized.startsWith("127.");
@@ -926,6 +1034,7 @@ async function callOpenCode(req, payload, upstreamContext) {
 
   if (!response.ok) {
     const text = await response.text();
+    console.error(`Upstream payload summary: ${JSON.stringify(payloadDebugSummary(payload))}`);
     const error = new Error(`OpenCode Go returned ${response.status}: ${text}`);
     error.status = response.status;
     throw error;

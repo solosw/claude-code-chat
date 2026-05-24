@@ -83,6 +83,218 @@ test("anthropicToOpenAi converts messages, tools, and DeepSeek reasoning", () =>
   assert.equal(payload.tool_choice, undefined);
 });
 
+test("anthropicToOpenAi coalesces split assistant tool calls before tool results", () => {
+  const payload = bridge.anthropicToOpenAi(
+    {
+      model: "deepseek-v4-pro[1m]",
+      messages: [
+        { role: "user", content: "Update docs." },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_1",
+              name: "Edit",
+              input: { file_path: "CLAUDE.md" },
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_2",
+              name: "Edit",
+              input: { file_path: "README.md" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_1",
+              content: "CLAUDE.md updated",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_2",
+              content: "README.md updated",
+            },
+          ],
+        },
+      ],
+    },
+    false,
+  );
+
+  assert.deepEqual(
+    payload.messages.map((message) => message.role),
+    ["user", "assistant", "tool", "tool"],
+  );
+  assert.equal(payload.messages[1].tool_calls.length, 2);
+  assert.equal(payload.messages[1].tool_calls[0].id, "call_1");
+  assert.equal(payload.messages[1].tool_calls[1].id, "call_2");
+  assert.equal(payload.messages[2].tool_call_id, "call_1");
+  assert.equal(payload.messages[3].tool_call_id, "call_2");
+});
+
+test("anthropicToOpenAi keeps tool results before user text in a mixed user block", () => {
+  const payload = bridge.anthropicToOpenAi(
+    {
+      model: "deepseek-v4-pro[1m]",
+      messages: [
+        { role: "user", content: "Read then continue." },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_1",
+              name: "Read",
+              input: { file_path: "README.md" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Continue after this result." },
+            {
+              type: "tool_result",
+              tool_use_id: "call_1",
+              content: "README contents",
+            },
+          ],
+        },
+      ],
+    },
+    false,
+  );
+
+  assert.deepEqual(
+    payload.messages.map((message) => message.role),
+    ["user", "assistant", "tool", "user"],
+  );
+  assert.equal(payload.messages[2].tool_call_id, "call_1");
+  assert.equal(payload.messages[3].content, "Continue after this result.");
+});
+
+test("anthropicToOpenAi drops unfulfilled tool calls from broken history", () => {
+  const payload = bridge.anthropicToOpenAi(
+    {
+      model: "deepseek-v4-pro[1m]",
+      messages: [
+        { role: "user", content: "Update docs." },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_1",
+              name: "Edit",
+              input: { file_path: "CLAUDE.md" },
+            },
+            {
+              type: "tool_use",
+              id: "call_2",
+              name: "Edit",
+              input: { file_path: "README.md" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_2",
+              content: "README.md updated",
+            },
+          ],
+        },
+      ],
+    },
+    false,
+  );
+
+  assert.deepEqual(
+    payload.messages.map((message) => message.role),
+    ["user", "assistant", "tool"],
+  );
+  assert.equal(payload.messages[1].tool_calls.length, 1);
+  assert.equal(payload.messages[1].tool_calls[0].id, "call_2");
+  assert.equal(payload.messages[2].tool_call_id, "call_2");
+});
+
+test("anthropicToOpenAi removes assistant tool calls when all results are missing", () => {
+  const payload = bridge.anthropicToOpenAi(
+    {
+      model: "deepseek-v4-pro[1m]",
+      messages: [
+        { role: "user", content: "Read a file." },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I will inspect it." },
+            {
+              type: "tool_use",
+              id: "call_1",
+              name: "Read",
+              input: { file_path: "README.md" },
+            },
+          ],
+        },
+        { role: "user", content: "The result was lost, continue anyway." },
+      ],
+    },
+    false,
+  );
+
+  assert.deepEqual(
+    payload.messages.map((message) => message.role),
+    ["user", "assistant", "user"],
+  );
+  assert.equal(payload.messages[1].tool_calls, undefined);
+  assert.equal(payload.messages[1].content, "I will inspect it.");
+});
+
+test("anthropicToOpenAi converts orphan tool results into user text", () => {
+  const payload = bridge.anthropicToOpenAi(
+    {
+      model: "deepseek-v4-pro[1m]",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_missing",
+              content: "orphan result",
+            },
+          ],
+        },
+      ],
+    },
+    false,
+  );
+
+  assert.deepEqual(
+    payload.messages.map((message) => message.role),
+    ["user"],
+  );
+  assert.match(payload.messages[0].content, /Tool result without a matching tool call/);
+  assert.match(payload.messages[0].content, /orphan result/);
+});
+
 test("openAiToAnthropic converts text and tool calls", () => {
   const message = bridge.openAiToAnthropic(
     {
@@ -138,40 +350,6 @@ test("openAiToAnthropic converts text and tool calls", () => {
     name: "Read",
     input: { file_path: "README.md" },
   });
-});
-
-test("anthropicMessagesToOpenAi keeps user image blocks", () => {
-  const messages = bridge.anthropicMessagesToOpenAi([
-    {
-      role: "user",
-      content: [
-        { type: "text", text: "What is in this image?" },
-        {
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: "image/png",
-            data: "aW1hZ2UtYnl0ZXM=",
-          },
-        },
-      ],
-    },
-  ]);
-
-  assert.deepEqual(messages, [
-    {
-      role: "user",
-      content: [
-        { type: "text", text: "What is in this image?" },
-        {
-          type: "image_url",
-          image_url: {
-            url: "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
-          },
-        },
-      ],
-    },
-  ]);
 });
 
 test("upstreamResponseHeaders keeps only safe response headers", () => {

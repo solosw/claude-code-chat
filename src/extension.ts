@@ -160,6 +160,16 @@ interface ConversationData {
 	filename: string;
 }
 
+interface LatestChangeHistoryEntry {
+	entryKey: string;
+	toolName: 'Edit' | 'Write' | 'MultiEdit';
+	timeLabel: string;
+	oldContent: string;
+	newContent: string;
+	beforeExists: boolean;
+	updatedAt: number;
+}
+
 interface LatestChangeItem {
 	changeKey: string;
 	sessionId: string;
@@ -175,6 +185,7 @@ interface LatestChangeItem {
 	newContent: string;
 	beforeExists: boolean;
 	updatedAt: number;
+	history: LatestChangeHistoryEntry[];
 }
 
 interface PendingLatestChange {
@@ -276,8 +287,77 @@ function buildResponsesBridgeEnv(profile: Pick<OpenAIBridgeProfile, 'bridgeBaseU
 	return env;
 }
 
+function getDefaultOpenAIBridgeReasoningCachePath(workspacePath: string | undefined): string {
+	return workspacePath
+		? path.join(workspacePath, '.claude', 'reasoning-cache.json')
+		: path.join(os.homedir(), '.claude', 'deepseek-v4-opencode-claude-code-bridge-reasoning-cache.json');
+}
+
+function createPendingLatestChangeKey(sessionId: string | undefined, filePath: string, toolUseId: string | undefined): string {
+	return `${sessionId || 'session'}::${filePath}::${toolUseId || 'tool'}`;
+}
+
+function resolveToolUseForResult(
+	conversation: Array<{ timestamp?: string; messageType: string; data: any }>,
+	toolUseId: string | undefined
+): { timestamp?: string; messageType: string; data: any } | undefined {
+	if (toolUseId) {
+		for (let index = conversation.length - 1; index >= 0; index -= 1) {
+			const item = conversation[index];
+			if (item?.messageType === 'toolUse' && item?.data?.toolUseId === toolUseId) {
+				return item;
+			}
+		}
+	}
+	for (let index = conversation.length - 1; index >= 0; index -= 1) {
+		const item = conversation[index];
+		if (item?.messageType === 'toolUse') {
+			return item;
+		}
+	}
+	return undefined;
+}
+
+function toLatestChangeHistoryEntry(item: LatestChangeItem): LatestChangeHistoryEntry {
+	return {
+		entryKey: item.changeKey,
+		toolName: item.toolName,
+		timeLabel: item.timeLabel,
+		oldContent: item.oldContent,
+		newContent: item.newContent,
+		beforeExists: item.beforeExists,
+		updatedAt: item.updatedAt,
+	};
+}
+
+function mergeLatestChangeItem(items: LatestChangeItem[], incoming: LatestChangeItem): LatestChangeItem[] {
+	const existingIndex = items.findIndex(item => item.sessionId === incoming.sessionId && item.filePath === incoming.filePath);
+	if (existingIndex < 0) {
+		return [{ ...incoming, history: incoming.history?.length ? incoming.history : [toLatestChangeHistoryEntry(incoming)] }, ...items];
+	}
+
+	const existing = items[existingIndex];
+	const nextHistory = [
+		...(existing.history?.length ? existing.history : [toLatestChangeHistoryEntry(existing)]),
+		...(incoming.history?.length ? incoming.history : [toLatestChangeHistoryEntry(incoming)]),
+	];
+	const merged: LatestChangeItem = {
+		...incoming,
+		changeKey: existing.changeKey,
+		oldContent: existing.oldContent,
+		beforeExists: existing.beforeExists,
+		history: nextHistory,
+	};
+	const nextItems = items.slice();
+	nextItems[existingIndex] = merged;
+	return nextItems;
+}
+
 export const __testNormalizeOpenAIBridgeCategory = normalizeOpenAIBridgeCategory;
 export const __testBuildResponsesBridgeEnv = buildResponsesBridgeEnv;
+export const __testCreatePendingLatestChangeKey = createPendingLatestChangeKey;
+export const __testResolveToolUseForResult = resolveToolUseForResult;
+export const __testMergeLatestChangeItem = mergeLatestChangeItem;
 
 function getResponsesBridgeDir(extensionPath: string): string {
 	return path.join(extensionPath, 'llm-proxy-main');
@@ -729,7 +809,7 @@ class ClaudeChatProvider {
 			subagentModel: typeof profile?.subagentModel === 'string' ? profile.subagentModel : '',
 			effortLevel: typeof profile?.effortLevel === 'string' && profile.effortLevel ? profile.effortLevel : 'max',
 			reasoningContent: typeof profile?.reasoningContent === 'string' && profile.reasoningContent ? profile.reasoningContent : 'auto',
-			reasoningCachePath: typeof profile?.reasoningCachePath === 'string' ? profile.reasoningCachePath : '',
+			reasoningCachePath: typeof profile?.reasoningCachePath === 'string' && profile.reasoningCachePath ? profile.reasoningCachePath : getDefaultOpenAIBridgeReasoningCachePath(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
 			requestBodyLimitBytes: typeof profile?.requestBodyLimitBytes === 'number' ? profile.requestBodyLimitBytes : 104857600,
 			upstreamTimeoutMs: typeof profile?.upstreamTimeoutMs === 'number' ? profile.upstreamTimeoutMs : 600000
 		}));
@@ -825,7 +905,7 @@ class ClaudeChatProvider {
 			subagentModel: typeof profile?.subagentModel === 'string' ? profile.subagentModel.trim() : '',
 			effortLevel: typeof profile?.effortLevel === 'string' && profile.effortLevel.trim() ? profile.effortLevel.trim() : 'max',
 			reasoningContent: typeof profile?.reasoningContent === 'string' && profile.reasoningContent.trim() ? profile.reasoningContent.trim() : 'auto',
-			reasoningCachePath: typeof profile?.reasoningCachePath === 'string' ? profile.reasoningCachePath.trim() : '',
+			reasoningCachePath: typeof profile?.reasoningCachePath === 'string' && profile.reasoningCachePath.trim() ? profile.reasoningCachePath.trim() : getDefaultOpenAIBridgeReasoningCachePath(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
 			requestBodyLimitBytes: typeof profile?.requestBodyLimitBytes === 'number' ? profile.requestBodyLimitBytes : 104857600,
 			upstreamTimeoutMs: typeof profile?.upstreamTimeoutMs === 'number' ? profile.upstreamTimeoutMs : 600000
 		};
@@ -889,7 +969,7 @@ class ClaudeChatProvider {
 			},
 			models: [profile.model || 'deepseek-v4-pro[1m]', profile.fastModel || 'deepseek-v4-flash'],
 			reasoningContent: profile.reasoningContent || 'auto',
-			reasoningCachePath: profile.reasoningCachePath || path.join(os.homedir(), '.claude', 'deepseek-v4-opencode-claude-code-bridge-reasoning-cache.json'),
+			reasoningCachePath: profile.reasoningCachePath || getDefaultOpenAIBridgeReasoningCachePath(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath),
 			requestBodyLimitBytes: profile.requestBodyLimitBytes || 104857600,
 			upstreamTimeoutMs: profile.upstreamTimeoutMs || 600000
 		};
@@ -2280,16 +2360,15 @@ class ClaudeChatProvider {
 									}
 
 									const filePath = content.input.file_path as string;
-									const changeKey = `${this._currentSessionId || 'session'}::${filePath}`;
-									const existingChange = this._currentLatestChanges.find(change => change.changeKey === changeKey);
+									const changeKey = createPendingLatestChangeKey(this._currentSessionId, filePath, content.id);
 									this._pendingLatestChanges.set(changeKey, {
 										changeKey,
 										sessionId: this._currentSessionId || 'session',
 										filePath,
 										absolutePath: filePath,
 										toolName: content.name,
-										oldContent: existingChange ? existingChange.oldContent : fileContentBefore,
-										beforeExists: existingChange ? existingChange.beforeExists : fileContentBefore !== '',
+										oldContent: fileContentBefore,
+										beforeExists: fileContentBefore !== '',
 										updatedAt: Date.now(),
 									});
 								}
@@ -2329,6 +2408,7 @@ class ClaudeChatProvider {
 									toolInput: toolInput,
 									rawInput: content.input,
 									toolName: content.name,
+									toolUseId: content.id,
 									fileContentBefore: fileContentBefore,
 									startLine: startLine,
 									startLines: startLines
@@ -2354,12 +2434,13 @@ class ClaudeChatProvider {
 							const isError = content.is_error || false;
 
 							// Find the last tool use to get the tool name, input, and computed startLine
-							const lastToolUse = this._currentConversation[this._currentConversation.length - 1]
+							const matchedToolUse = resolveToolUseForResult(this._currentConversation, content.tool_use_id);
 
-							const toolName = lastToolUse?.data?.toolName;
-							const rawInput = lastToolUse?.data?.rawInput;
-							const startLine = lastToolUse?.data?.startLine;
-							const startLines = lastToolUse?.data?.startLines;
+								const toolName = matchedToolUse?.data?.toolName;
+								const rawInput = matchedToolUse?.data?.rawInput;
+								const startLine = matchedToolUse?.data?.startLine;
+								const startLines = matchedToolUse?.data?.startLines;
+								const toolUseId = matchedToolUse?.data?.toolUseId || content.tool_use_id;
 
 							// For Edit/MultiEdit/Write, read current file content (after state)
 							let fileContentAfter: string | undefined;
@@ -2373,7 +2454,7 @@ class ClaudeChatProvider {
 								}
 
 								const filePath = rawInput.file_path as string;
-								const changeKey = `${this._currentSessionId || 'session'}::${filePath}`;
+								const changeKey = createPendingLatestChangeKey(this._currentSessionId, filePath, toolUseId);
 								const pending = this._pendingLatestChanges.get(changeKey);
 								if (pending) {
 									this._pendingLatestChanges.delete(changeKey);
@@ -2394,13 +2475,9 @@ class ClaudeChatProvider {
 										newContent: fileContentAfter ?? '',
 										beforeExists: pending.beforeExists,
 										updatedAt: Date.now(),
+										history: [],
 									};
-									const existingIndex = this._currentLatestChanges.findIndex(change => change.changeKey === changeKey);
-									if (existingIndex >= 0) {
-										this._currentLatestChanges[existingIndex] = item;
-									} else {
-										this._currentLatestChanges.push(item);
-									}
+									this._currentLatestChanges = mergeLatestChangeItem(this._currentLatestChanges, item);
 									this._persistLatestChanges();
 									void this._sendLatestChanges();
 								}
@@ -5497,13 +5574,10 @@ class ClaudeChatProvider {
 				newContent,
 				beforeExists: resolvedBeforeExists,
 				updatedAt: Date.now(),
+				history: [],
 			};
 
-			if (existingIndex >= 0) {
-				this._currentLatestChanges[existingIndex] = item;
-			} else {
-				this._currentLatestChanges.push(item);
-			}
+			this._currentLatestChanges = mergeLatestChangeItem(this._currentLatestChanges, item);
 		}
 
 		this._persistLatestChanges();

@@ -4,6 +4,18 @@ All notable changes to the "claude-code-chat" extension will be documented in th
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.0.26] - 2026-05-24
+
+### 🐛 Bug Fixes
+- Fixed missed file change capture for `Edit`, `Write`, and `MultiEdit` tool operations in both chat messages and latest changes tracking
+- Fixed tool result correlation to match the correct `tool_use_id` instead of attaching results to the last tool call
+- Default `Reasoning Cache Path` for OpenAI Bridge profiles now uses the current workspace path: `.claude/reasoning-cache.json`
+
+### 🔧 Technical Improvements
+- Added regression tests for tool result correlation and OpenAI Bridge reasoning cache path defaults
+- Removed the `llm-proxy-main` self-referential local dependency that created a packaging symlink loop
+- Restored successful VSIX packaging for version `2.0.26`
+
 ## [1.1.0] - 2025-12-06
 
 ### 🚀 Features Added

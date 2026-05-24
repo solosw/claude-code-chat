@@ -1331,10 +1331,9 @@ const styles = `
     }
 
     .latest-change-item {
-        display: grid;
-        grid-template-columns: 16px minmax(0, 1fr) auto auto;
-        gap: 8px;
-        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
         padding: 8px 9px;
         border-radius: 10px;
         cursor: pointer;
@@ -1345,6 +1344,52 @@ const styles = `
         position: relative;
         z-index: 1;
         pointer-events: auto;
+    }
+
+    .latest-change-summary {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr) auto auto;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .latest-change-history {
+        display: none;
+        padding-left: 24px;
+        gap: 6px;
+        flex-direction: column;
+    }
+
+    .latest-change-item.history-expanded .latest-change-history {
+        display: flex;
+    }
+
+    .latest-change-history-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-panel-background));
+    }
+
+    .latest-change-history-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .latest-change-history-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--vscode-foreground);
+    }
+
+    .latest-change-history-meta {
+        font-size: 10px;
+        color: var(--vscode-descriptionForeground);
     }
 
     .latest-change-item:hover {
